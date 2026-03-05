@@ -1,0 +1,8 @@
+openai
+mediapipe
+pdfplumber
+python-dotenv
+python-pptx
+reachy-mini
+numpy
+scipy
