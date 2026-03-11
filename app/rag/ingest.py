@@ -2,26 +2,29 @@
 
 import argparse, hashlib, os
 from datetime import datetime, timezone
+from dotenv import load_dotenv
 from langchain_core.documents import Document
+from langchain_ollama import OllamaEmbeddings
+from langchain_openai import OpenAIEmbeddings
+from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
 from langchain_text_splitters import TokenTextSplitter
-from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
+from app.parsers.parsers import parse
 
-QDRANT_URL = "http://localhost:6333"
+load_dotenv()
+
+QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 
 
 def get_embeddings(provider: str, model: str):
     if provider == "openai":
-        from langchain_openai import OpenAIEmbeddings
         return OpenAIEmbeddings(model=model)
     elif provider == "ollama":
-        from langchain_ollama import OllamaEmbeddings
         return OllamaEmbeddings(model=model)
     raise ValueError(f"Unknown provider: {provider}")
 
-def ingest(file_path: str, provider: str = "ollama", model: str = "nomic-embed-text", collection: str = "reachy_collection", parser: str = "pdfplumber") -> int:
-    from app.parsers.parsers import parse
+def ingest(file_path: str, provider: str = "ollama", model: str = "nomic-embed-text", collection: str = "reachy_collection", parser: str = "pdfplumber", sparse_model: str = "Qdrant/bm25") -> int:
     file_path = os.path.abspath(file_path)
     doc_id = hashlib.sha256(file_path.encode()).hexdigest()
 
@@ -35,7 +38,7 @@ def ingest(file_path: str, provider: str = "ollama", model: str = "nomic-embed-t
             metadata={
                 "source": file_path,
                 "doc_id": doc_id,
-                "index": i,
+                "page": i,
                 "ingested_at": datetime.now(timezone.utc).isoformat(),
                 "embedding_model": model,
             },
@@ -62,8 +65,12 @@ def ingest(file_path: str, provider: str = "ollama", model: str = "nomic-embed-t
 
     # 5. Embed + store (LangChain handles collection creation, batching, upsert)
     embeddings = get_embeddings(provider, model)
+    sparse = FastEmbedSparse(model_name=sparse_model)
     QdrantVectorStore.from_documents(
-        chunks, embeddings, url=QDRANT_URL, collection_name=collection,
+        chunks, embeddings,
+        sparse_embedding=sparse,
+        retrieval_mode=RetrievalMode.HYBRID,
+        url=QDRANT_URL, collection_name=collection,
     )
 
     return len(chunks)
@@ -76,7 +83,8 @@ if __name__ == "__main__":
     parser.add_argument("--model", default="nomic-embed-text")
     parser.add_argument("--collection", default="reachy_collection")
     parser.add_argument("--parser", default="pdfplumber")
+    parser.add_argument("--sparse-model", default="Qdrant/bm25", dest="sparse_model")
     args = parser.parse_args()
 
-    n = ingest(args.file, args.provider, args.model, args.collection, args.parser)
+    n = ingest(args.file, args.provider, args.model, args.collection, args.parser, args.sparse_model)
     print(f"Ingested {n} chunks from {args.file} using {args.provider}")
