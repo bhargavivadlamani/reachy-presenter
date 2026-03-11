@@ -1,7 +1,6 @@
 """Orchestrates parsing, LLM call and presentation through Reachy Mini."""
 
 import argparse
-import os
 
 from reachy_mini import ReachyMini
 
@@ -10,19 +9,9 @@ from app.robot.gestures import emotion_gesture, slide_transition
 from app.robot.tts import speak
 
 
-def load_slides(file_path: str) -> list[str]:
-    ext = os.path.splitext(file_path)[1].lower()
-    if ext == ".pdf":
-        from app.parsers.pdf_parser import extract_slides
-    elif ext in (".pptx", ".ppt"):
-        from app.parsers.pptx_parser import extract_slides
-    else:
-        raise ValueError(f"Unsupported file type: {ext}")
-    return extract_slides(file_path)
-
-
-def present(file_path: str) -> None:
-    slides = load_slides(file_path)
+def present(file_path: str, parser: str = "pdfplumber") -> None:
+    from app.parsers.parsers import parse
+    slides = parse(file_path, parser=parser)
 
     # Pre-generate all scripts and classify emotions before connecting to robot
     print("Generating scripts for all slides...")
@@ -59,8 +48,9 @@ def present(file_path: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Reachy Mini Presenter")
     parser.add_argument("file", help="Path to a .pdf or .pptx file")
+    parser.add_argument("--parser", default="pdfplumber")
     args = parser.parse_args()
-    present(args.file)
+    present(args.file, parser=args.parser)
 
 
 if __name__ == "__main__":

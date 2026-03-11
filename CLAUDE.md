@@ -32,4 +32,4 @@ Data flow:
 Key points:
 - Pre-computation (LLM calls) happens before robot connection so the robot isn't idle
 - Audio and face-tracking threads are synchronized to audio duration
-- `load_slides()` in `main.py` uses lazy imports based on file extension
+- `load_data()` in `main.py` uses lazy imports based on file extension

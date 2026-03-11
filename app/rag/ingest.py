@@ -10,10 +10,6 @@ from qdrant_client.models import Filter, FieldCondition, MatchValue
 
 QDRANT_URL = "http://localhost:6333"
 
-PROVIDERS = {
-    "openai":  {"model": "text-embedding-3-small", "dims": 1536},
-    "ollama":  {"model": "nomic-embed-text",        "dims": 768},
-}
 
 def get_embeddings(provider: str, model: str):
     if provider == "openai":
@@ -24,40 +20,27 @@ def get_embeddings(provider: str, model: str):
         return OllamaEmbeddings(model=model)
     raise ValueError(f"Unknown provider: {provider}")
 
-def load_slides(file_path: str) -> list[str]:
-    ext = os.path.splitext(file_path)[1].lower()
-    if ext == ".pdf":
-        from app.parsers.pdf_parser import extract_slides
-    elif ext in (".pptx", ".ppt"):
-        from app.parsers.pptx_parser import extract_slides
-    else:
-        raise ValueError(f"Unsupported file type: {ext}")
-    return extract_slides(file_path)
-
-def ingest(file_path: str, provider: str = "openai", model: str | None = None) -> int:
+def ingest(file_path: str, provider: str = "ollama", model: str = "nomic-embed-text", collection: str = "reachy_collection", parser: str = "pdfplumber") -> int:
+    from app.parsers.parsers import parse
     file_path = os.path.abspath(file_path)
-    ext = os.path.splitext(file_path)[1].lower().lstrip(".")
     doc_id = hashlib.sha256(file_path.encode()).hexdigest()
-    model = model or PROVIDERS[provider]["model"]
-    collection = f"reachy_slides_{provider}"
 
-    # 1. Load slides via existing parsers
-    slides = load_slides(file_path)
+    # 1. Load data via parsers module
+    data = parse(file_path, parser=parser)
 
-    # 2. Wrap each slide as a LangChain Document with metadata
+    # 2. Wrap each data instance as a LangChain Document with metadata
     docs = [
         Document(
             page_content=text,
             metadata={
                 "source": file_path,
                 "doc_id": doc_id,
-                "slide_index": i,
-                "file_type": ext,
+                "index": i,
                 "ingested_at": datetime.now(timezone.utc).isoformat(),
                 "embedding_model": model,
             },
         )
-        for i, text in enumerate(slides)
+        for i, text in enumerate(data)
         if text.strip()
     ]
 
@@ -89,9 +72,11 @@ def ingest(file_path: str, provider: str = "openai", model: str | None = None) -
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("file")
-    parser.add_argument("--provider", choices=["openai", "ollama"], default="openai")
-    parser.add_argument("--model", default=None)
+    parser.add_argument("--provider", choices=["openai", "ollama"], default="ollama")
+    parser.add_argument("--model", default="nomic-embed-text")
+    parser.add_argument("--collection", default="reachy_collection")
+    parser.add_argument("--parser", default="pdfplumber")
     args = parser.parse_args()
 
-    n = ingest(args.file, args.provider, args.model)
+    n = ingest(args.file, args.provider, args.model, args.collection, args.parser)
     print(f"Ingested {n} chunks from {args.file} using {args.provider}")
