@@ -6,3 +6,10 @@ python-pptx
 reachy-mini
 numpy
 scipy
+langchain-core
+langchain-text-splitters
+langchain-openai
+langchain-ollama
+langchain-qdrant
+qdrant-client
+tiktoken
