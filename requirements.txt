@@ -16,3 +16,5 @@ tiktoken
 sentence-transformers
 fastembed
 cohere
+ragas
+rapidfuzz

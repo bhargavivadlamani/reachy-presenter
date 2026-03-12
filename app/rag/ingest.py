@@ -84,7 +84,19 @@ if __name__ == "__main__":
     parser.add_argument("--collection", default="reachy_collection")
     parser.add_argument("--parser", default="pdfplumber")
     parser.add_argument("--sparse-model", default="Qdrant/bm25", dest="sparse_model")
+    parser.add_argument("--eval", type=int, choices=[0, 1], default=1,
+                        help="1 = run retrieval eval after ingestion")
     args = parser.parse_args()
 
     n = ingest(args.file, args.provider, args.model, args.collection, args.parser, args.sparse_model)
     print(f"Ingested {n} chunks from {args.file} using {args.provider}")
+
+    if args.eval:
+        from app.rag.eval import eval_retrieval
+        eval_retrieval(
+            file_path=args.file,
+            provider=args.provider,
+            model=args.model,
+            collection=args.collection,
+            sparse_model=args.sparse_model,
+        )
