@@ -57,9 +57,9 @@ ollama pull nomic-embed-text
 
 ## Data Ingestion
 
-Parses a PDF or PPTX file, splits it into 400-token chunks, embeds each chunk as both a **dense vector** (semantic) and a **sparse vector** (BM25), and stores everything in Qdrant.
+Parses a PDF or PPTX file, splits it into chunks, embeds each chunk as both a **dense vector** (semantic) and a **sparse vector** (BM25), and stores everything in Qdrant.
 
-Re-ingesting the same file is **idempotent** — existing chunks for that file are deleted before re-inserting.
+Re-ingesting the same file is **idempotent** — existing chunks for that file are deleted before re-inserting. Document identity is based on a SHA-256 hash of the file contents, so renaming or moving the file does not orphan old chunks.
 
 ### Usage
 
@@ -77,6 +77,9 @@ python -m app.rag.ingest <file> [options]
 | `--collection` | `reachy_collection` | Qdrant collection name |
 | `--parser` | `pdfplumber` | Parser to use: `pdfplumber` or `python-pptx` |
 | `--sparse-model` | `Qdrant/bm25` | Sparse (BM25) model for hybrid search |
+| `--chunk-size` | `400` | Chunk size in tokens |
+| `--chunk-overlap` | `60` | Overlap between consecutive chunks in tokens |
+| `--eval` | `0` | Set to `1` to run retrieval eval immediately after ingestion |
 
 ### Examples
 
@@ -114,7 +117,7 @@ python -m app.rag.ingest slides.pdf --collection my_collection
 
 ## Retrieval
 
-Given a query string, runs **hybrid search** (BM25 + dense vector) over the Qdrant collection to fetch top-20 candidate chunks, then **reranks** them to return the top-N most relevant chunks with source metadata.
+Given a query string, runs **hybrid search** (BM25 + dense vector) over the Qdrant collection to fetch candidate chunks, then **reranks** them to return the top-N most relevant chunks with source metadata.
 
 ### Usage
 
@@ -133,6 +136,7 @@ python -m app.rag.retrieve "<query>" [options]
 | `--sparse-model` | `Qdrant/bm25` | Sparse model (must match ingest) |
 | `--reranker` | `cross-encoder` | Reranker to use: `cross-encoder` or `cohere` |
 | `--top-n` | `5` | Number of final chunks to return after reranking |
+| `--retriever-k` | `20` | Number of candidates fetched from Qdrant before reranking |
 
 ### Examples
 
@@ -170,6 +174,8 @@ Each retrieved chunk is printed with its source file and page number:
 | `cohere` | `rerank-english-v3.0` | Hosted, best quality, requires `COHERE_API_KEY` |
 
 Override the cross-encoder model via `CROSS_ENCODER_MODEL` in `.env`.
+
+**Bi-encoders vs cross-encoders** — bi-encoders (used in Stage 1) embed the query and each document independently, making them fast enough for large-scale retrieval but unable to model query-document interactions. Cross-encoders (used in Stage 2) take the query and a candidate document together as a single input, giving much richer relevance scoring at the cost of speed — which is why they're applied only to the top-20 shortlist, not the full collection. See: [Pinecone — Rerankers](https://www.pinecone.io/learn/series/rag/rerankers/)
 
 ---
 
@@ -212,6 +218,8 @@ build_context()  →  [1] Source: ...\n<text>\n\n[2] ...
 ```
 
 ---
+
+![Vector Similarity & RRF in Hybrid Search](similarity_hybrid.png)
 
 ## Retrieval Evaluation
 

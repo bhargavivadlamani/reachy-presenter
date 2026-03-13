@@ -11,6 +11,7 @@ from app.rag.ingest import QDRANT_URL, get_embeddings
 load_dotenv()
 
 CROSS_ENCODER_MODEL = os.getenv("CROSS_ENCODER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+_cross_encoder = CrossEncoder(CROSS_ENCODER_MODEL)
 
 
 def rerank(query: str, chunks: list[Document], reranker: str = "cross-encoder", top_k: int = 5) -> list[Document]:
@@ -22,8 +23,7 @@ def rerank(query: str, chunks: list[Document], reranker: str = "cross-encoder", 
 
 
 def _rerank_cross_encoder(query: str, chunks: list[Document], top_k: int) -> list[Document]:
-    model = CrossEncoder(CROSS_ENCODER_MODEL)
-    scores = model.predict([(query, c.page_content) for c in chunks])
+    scores = _cross_encoder.predict([(query, c.page_content) for c in chunks])
     ranked = sorted(zip(scores, chunks), key=lambda x: x[0], reverse=True)
     return [c for _, c in ranked[:top_k]]
 
@@ -57,6 +57,7 @@ def retrieve(
     sparse_model: str = "Qdrant/bm25",
     reranker: str = "cross-encoder",
     top_n: int = 3,
+    retriever_k: int = 20,
 ) -> list[Document]:
     embeddings = get_embeddings(provider, model)
     sparse = FastEmbedSparse(model_name=sparse_model)
@@ -70,7 +71,7 @@ def retrieve(
         retrieval_mode=RetrievalMode.HYBRID,
     )
 
-    candidates = store.similarity_search(query, k=20)
+    candidates = store.similarity_search(query, k=retriever_k)
     return rerank(query, candidates, reranker=reranker, top_k=top_n)
 
 
@@ -83,7 +84,8 @@ if __name__ == "__main__":
     parser.add_argument("--sparse-model", default="Qdrant/bm25", dest="sparse_model")
     parser.add_argument("--reranker", choices=["cross-encoder", "cohere"], default="cross-encoder")
     parser.add_argument("--top-n", type=int, default=5, dest="top_n")
+    parser.add_argument("--retriever-k", type=int, default=20, dest="retriever_k")
     args = parser.parse_args()
 
-    chunks = retrieve(args.query, args.collection, args.provider, args.model, args.sparse_model, args.reranker, args.top_n)
+    chunks = retrieve(args.query, args.collection, args.provider, args.model, args.sparse_model, args.reranker, args.top_n, args.retriever_k)
     print(build_context(chunks))
