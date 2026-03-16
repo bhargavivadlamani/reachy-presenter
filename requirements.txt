@@ -13,3 +13,8 @@ langchain-ollama
 langchain-qdrant
 qdrant-client
 tiktoken
+sentence-transformers
+fastembed
+cohere
+ragas
+rapidfuzz
