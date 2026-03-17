@@ -226,7 +226,32 @@ build_context()  →  [1] Source: ...\n<text>\n\n[2] ...
 
 ### Overview
 
-`eval.py` measures five IR metrics at both pipeline stages so you can see the retriever's recall ceiling and the reranker's precision/ordering contribution separately. Without measuring both stages independently, you cannot tell whether poor output comes from the retriever failing to surface the relevant chunk at all, or from the reranker pushing it out of the top-N window.
+`eval.py` measures five offline IR metrics at both pipeline stages so you can see the retriever's recall ceiling and the reranker's precision/ordering contribution separately. Without measuring both stages independently, you cannot tell whether poor output comes from the retriever failing to surface the relevant chunk at all, or from the reranker pushing it out of the top-N window.
+
+### General classification of metrics
+
+| Category | When to use | Examples |
+|---|---|---|
+| **With ground truth** (offline / labeled) | You have reference answers or labeled relevant chunks; gives precise, reproducible scores | Recall@K, Precision@K, Hit@K, MRR, NDCG@K |
+| **Without ground truth** (online / LLM-as-judge) | No labels available; an LLM scores relevance or faithfulness at runtime | Context Relevance, Context Recall, Answer Faithfulness (RAGAS) |
+| **Practical signals** (no labels needed) | Quick sanity checks during development; no LLM judge required | Chunk diversity, human spot-check of `build_context()` output |
+
+  - Context Relevance — does each retrieved chunk actually relate to the query? (RAGAS metric)
+  - Context Recall — does the retrieved context contain all info needed to answer? (requires a reference answer)
+  - Context Precision — are the relevant chunks ranked above the irrelevant ones?
+  - Answer Faithfulness — does the final LLM answer only use facts from the retrieved context? Hallucination proxy.
+  - Answer Relevance — does the final answer address the query? End-to-end signal that bubbles up retrieval quality.
+  - Chunk diversity — are you retrieving near-duplicate chunks? Low diversity wastes your top_n slots.
+
+"Offline" means the evaluation can be run outside of (separate from) the live system — you pre-collect a labeled
+dataset, then run scoring against it any time, without the production pipeline being active.
+
+"Online" metrics, which are measured during live system operation — e.g., an LLM judge scoring a retrieval at query time.
+
+Are both online and offline evals necessary for evaluating a  RAG pipeline?
+- Not strictly — it depends on what you're optimizing for.
+- Offline metrics are sufficient when you're tuning retrieval components in isolation (chunk size, embedding model, reranker choice). They're fast, cheap, reproducible, and don't require a running LLM.
+- Online/LLM-as-judge metrics become necessary when you care about end-to-end answer quality, not just whether the right chunk was retrieved. A retriever can score well on Recall@K but still produce bad answers if the LLM ignores or misuses the context — offline metrics won't catch that.
 
 ### Metrics
 
@@ -239,6 +264,8 @@ build_context()  →  [1] Source: ...\n<text>\n\n[2] ...
 **MRR (Mean Reciprocal Rank)** — the average of 1/rank_of_first_relevant across all queries. Especially useful for tasks where the LLM uses only the top result.
 
 **NDCG@K (Normalized Discounted Cumulative Gain)** — rewards placing relevant documents *higher* in the ranking. A result at rank 1 contributes more than the same result at rank 5. It is the only metric in this set that distinguishes "relevant at rank 1" from "relevant at rank K", and directly measures what the reranker is paid to do: ordering.
+
+**Chunk Diversity** — mean pairwise cosine similarity between retrieved chunks, computed over TF bag-of-words vectors. Range is 0–1: 0 means every chunk shares no vocabulary (maximally diverse), 1 means all chunks are identical. High similarity flags near-duplicate chunks wasting top-N slots. Reported for both stages — a reranker that raises similarity significantly is collapsing toward redundant results. No ground-truth labels required.
 
 ### Two-stage measurement
 

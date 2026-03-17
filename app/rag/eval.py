@@ -50,6 +50,12 @@ def _load_or_generate_testset(file_path: str, docs: list[Document], args, embedd
 
 
 def _is_relevant(chunk_text: str, reference_contexts: list[str], threshold: float = 0.3) -> bool:
+    """
+    Checks if a chunk is relevant to the reference contexts using Jaccard overlap.
+    Jaccard overlap (or Jaccard similarity) is a measure of similarity between two sets:
+    J(A, B) = |A ∩ B| / |A ∪ B|
+    It's the size of the intersection divided by the size of the union. Result is always between 0 and 1
+    """
     chunk_words = set(chunk_text.lower().split())
     for ctx in reference_contexts:
         ctx_words = set(ctx.lower().split())
@@ -85,13 +91,34 @@ def _compute_metrics(ranked_chunks: list[Document], reference_contexts: list[str
     return {"recall": recall, "precision": precision, "hit": hit, "mrr": mrr, "ndcg": ndcg}
 
 
+def _chunk_diversity(chunks: list[Document]) -> float:
+    """Mean pairwise cosine similarity of TF vectors (0 = diverse, 1 = identical)."""
+    if len(chunks) < 2:
+        return 0.0
+    texts = [c.page_content.lower().split() for c in chunks]
+    vocab = sorted({w for t in texts for w in t})
+    idx = {w: i for i, w in enumerate(vocab)}
+    vecs = np.zeros((len(texts), len(vocab)))
+    for i, tokens in enumerate(texts):
+        for w in tokens:
+            vecs[i, idx[w]] += 1
+    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+    norms[norms == 0] = 1
+    normed = vecs / norms
+    sim = normed @ normed.T
+    n = len(chunks)
+    pairs = [sim[i, j] for i in range(n) for j in range(i + 1, n)]
+    return float(np.mean(pairs))
+
+
 def _avg(metrics_list: list[dict]) -> dict:
     keys = metrics_list[0].keys()
     return {k: float(np.mean([m[k] for m in metrics_list])) for k in keys}
 
 
 def _print_report(file_path: str, n_questions: int, reranker: str, top_n: int,
-                  stage1_avg: dict, stage2_avg: dict, delta: dict, retriever_k: int = 20):
+                  stage1_avg: dict, stage2_avg: dict, delta: dict, retriever_k: int = 20,
+                  avg_diversity: dict = None):
     print("\n=== Retrieval Evaluation Metrics ===")
     print(f"File: {file_path}   Test questions: {n_questions}   Reranker: {reranker}   top-n: {top_n}\n")
 
@@ -113,6 +140,11 @@ def _print_report(file_path: str, n_questions: int, reranker: str, top_n: int,
     for key in ("recall", "precision", "hit", "mrr", "ndcg"):
         sign = "+" if delta[key] >= 0 else ""
         print(f"  {key.capitalize():<13} :  {sign}{delta[key]:.2f}")
+
+    if avg_diversity:
+        print(f"\nChunk Diversity (mean pairwise cosine sim; lower = more diverse)")
+        print(f"  Stage 1 (k={retriever_k})  :  {avg_diversity['stage1']:.3f}")
+        print(f"  Stage 2 (k={top_n})    :  {avg_diversity['stage2']:.3f}")
 
 
 def eval_retrieval(
@@ -165,6 +197,8 @@ def eval_retrieval(
     stage1_metrics = []
     stage2_metrics = []
     stage1_at_topn_metrics = []
+    stage1_diversity = []
+    stage2_diversity = []
 
     for item in testset_data:
         q = item["question"]
@@ -176,16 +210,22 @@ def eval_retrieval(
         stage1_metrics.append(_compute_metrics(candidates, ref_ctx, retriever_k))
         stage1_at_topn_metrics.append(_compute_metrics(candidates, ref_ctx, top_n))
         stage2_metrics.append(_compute_metrics(final, ref_ctx, top_n))
+        stage1_diversity.append(_chunk_diversity(candidates))
+        stage2_diversity.append(_chunk_diversity(final))
 
     # 5. Average and compute delta
     stage1_avg = _avg(stage1_metrics)
     stage2_avg = _avg(stage2_metrics)
     stage1_at_topn_avg = _avg(stage1_at_topn_metrics)
     delta = {k: stage2_avg[k] - stage1_at_topn_avg[k] for k in stage2_avg}
+    avg_diversity = {
+        "stage1": float(np.mean(stage1_diversity)),
+        "stage2": float(np.mean(stage2_diversity)),
+    }
 
     # 6. Print report
     _print_report(file_path, len(testset_data), reranker, top_n,
-                  stage1_avg, stage2_avg, delta, retriever_k)
+                  stage1_avg, stage2_avg, delta, retriever_k, avg_diversity)
 
 
 if __name__ == "__main__":

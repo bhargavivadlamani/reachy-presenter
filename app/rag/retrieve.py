@@ -59,6 +59,24 @@ def retrieve(
     top_n: int = 3,
     retriever_k: int = 20,
 ) -> list[Document]:
+
+    """
+    Retrieves relevant documents from the a vector store using hybrid search. 
+    Use it to get the relevant context for the query and ground the answers.
+    
+    Args:
+        query: The query to search for.
+        collection: The name of the collection to search in.
+        provider: The embedding provider to use.
+        model: The embedding model to use.
+        sparse_model: The sparse embedding model to use.
+        reranker: The reranker to use.
+        top_n: The number of documents to return.
+        retriever_k: The number of documents to retrieve.
+    
+    Returns:
+        A list of relevant documents.
+    """
     embeddings = get_embeddings(provider, model)
     sparse = FastEmbedSparse(model_name=sparse_model)
     client = QdrantClient(url=QDRANT_URL)
