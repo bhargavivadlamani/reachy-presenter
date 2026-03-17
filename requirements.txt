@@ -18,3 +18,4 @@ fastembed
 cohere
 ragas
 rapidfuzz
+docling

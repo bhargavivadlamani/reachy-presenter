@@ -75,7 +75,7 @@ python -m app.rag.ingest <file> [options]
 | `--provider` | `ollama` | Embedding provider: `openai` or `ollama` |
 | `--model` | `nomic-embed-text` | Dense embedding model name |
 | `--collection` | `reachy_collection` | Qdrant collection name |
-| `--parser` | `pdfplumber` | Parser to use: `pdfplumber` or `python-pptx` |
+| `--parser` | `docling` | Parser to use: `docling`, `pdfplumber`, or `python-pptx` |
 | `--sparse-model` | `Qdrant/bm25` | Sparse (BM25) model for hybrid search |
 | `--chunk-size` | `400` | Chunk size in tokens |
 | `--chunk-overlap` | `60` | Overlap between consecutive chunks in tokens |
@@ -110,7 +110,8 @@ python -m app.rag.ingest slides.pdf --collection my_collection
 
 | Parser | File types | Notes |
 |---|---|---|
-| `pdfplumber` (default) | `.pdf` | Extracts raw text per page |
+| `docling` (default) | `.pdf`, `.pptx` | Layout-aware chunking via HybridChunker |
+| `pdfplumber` | `.pdf` | Extracts raw text per page |
 | `python-pptx` | `.pptx`, `.ppt` | Extracts text from all shapes per slide |
 
 ---
