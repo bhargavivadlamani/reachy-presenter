@@ -1,4 +1,4 @@
-def parse(file_path: str, parser: str = "docling") -> list[str]:
+def parse(file_path: str, parser: str = "pdfplumber") -> list[str]:
     if parser == "pdfplumber":
         return _parse_pdfplumber(file_path)
     elif parser == "python-pptx":

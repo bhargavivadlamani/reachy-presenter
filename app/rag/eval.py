@@ -2,6 +2,7 @@
 # See app/rag/README.md for full documentation.
 
 import argparse, json, math, os
+from datetime import datetime, timezone
 import numpy as np
 from dotenv import load_dotenv
 from langchain_core.documents import Document
@@ -17,8 +18,20 @@ from langchain_ollama import ChatOllama
 load_dotenv()
 
 
-def _generate_testset(docs: list[Document], size: int, generator_model: str, embeddings) -> list[dict]:
-    llm = ChatOllama(model=generator_model)
+def _get_generator_llm(provider: str, model: str):
+    if provider == "ollama":
+        return ChatOllama(model=model)
+    elif provider == "openai":
+        from langchain_openai import ChatOpenAI
+        return ChatOpenAI(model=model, api_key=os.environ["OPENAI_API_KEY"])
+    elif provider == "gemini":
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        return ChatGoogleGenerativeAI(model=model, google_api_key=os.environ["GOOGLE_API_KEY"], convert_system_message_to_human=True, model_kwargs={"response_mime_type": "application/json"})
+    raise ValueError(f"Unknown generator provider: {provider}")
+
+
+def _generate_testset(docs: list[Document], size: int, generator_provider: str, generator_model: str, embeddings) -> list[dict]:
+    llm = _get_generator_llm(generator_provider, generator_model)
     generator = TestsetGenerator.from_langchain(llm, embeddings)
     result = generator.generate_with_langchain_docs(docs, testset_size=size)
     testset = []
@@ -39,7 +52,7 @@ def _load_or_generate_testset(file_path: str, docs: list[Document], args, embedd
                 raise ValueError("Each testset entry must have 'question' and 'reference_contexts' keys")
         return data
 
-    testset = _generate_testset(docs, args.testset_size, args.generator_model, embeddings)
+    testset = _generate_testset(docs, args.testset_size, args.generator_provider, args.generator_model, embeddings)
 
     if args.save_testset:
         with open(args.save_testset, "w") as f:
@@ -147,6 +160,15 @@ def _print_report(file_path: str, n_questions: int, reranker: str, top_n: int,
         print(f"  Stage 2 (k={top_n})    :  {avg_diversity['stage2']:.3f}")
 
 
+def _log_run(record: dict):
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    log_dir = os.path.join(os.path.dirname(__file__), "offline_eval_logs")
+    log_path = os.path.join(log_dir, f"eval_{ts}.json")
+    with open(log_path, "w") as f:
+        json.dump(record, f, indent=2)
+    print(f"\nRun logged to {log_path}")
+
+
 def eval_retrieval(
     file_path: str,
     provider: str = "ollama",
@@ -158,6 +180,7 @@ def eval_retrieval(
     testset_size: int = 20,
     testset: str = None,
     save_testset: str = None,
+    generator_provider: str = "openai",
     generator_model: str = "mistral",
     retriever_k: int = 20,
 ):
@@ -177,6 +200,7 @@ def eval_retrieval(
     _args.testset = testset
     _args.save_testset = save_testset
     _args.testset_size = testset_size
+    _args.generator_provider = generator_provider
     _args.generator_model = generator_model
 
     # 2. Load or generate testset
@@ -227,6 +251,23 @@ def eval_retrieval(
     _print_report(file_path, len(testset_data), reranker, top_n,
                   stage1_avg, stage2_avg, delta, retriever_k, avg_diversity)
 
+    # 7. Log run
+    _log_run({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "file": file_path,
+        "collection": collection,
+        "provider": provider,
+        "model": model,
+        "reranker": reranker,
+        "top_n": top_n,
+        "retriever_k": retriever_k,
+        "n_questions": len(testset_data),
+        "stage1": stage1_avg,
+        "stage2": stage2_avg,
+        "delta": delta,
+        "diversity": avg_diversity,
+    })
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -240,6 +281,7 @@ if __name__ == "__main__":
     parser.add_argument("--testset-size", type=int, default=20, dest="testset_size")
     parser.add_argument("--testset", default=None)
     parser.add_argument("--save-testset", default=None, dest="save_testset")
+    parser.add_argument("--generator-provider", choices=["ollama", "openai", "gemini"], default="ollama", dest="generator_provider")
     parser.add_argument("--generator-model", default="mistral", dest="generator_model")
     args = parser.parse_args()
 
@@ -254,5 +296,6 @@ if __name__ == "__main__":
         testset_size=args.testset_size,
         testset=args.testset,
         save_testset=args.save_testset,
+        generator_provider=args.generator_provider,
         generator_model=args.generator_model,
     )

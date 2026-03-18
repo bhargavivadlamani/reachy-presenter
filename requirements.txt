@@ -17,5 +17,5 @@ sentence-transformers
 fastembed
 cohere
 ragas
-rapidfuzz
 docling
+langchain-google-genai
