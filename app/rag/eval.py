@@ -9,6 +9,9 @@ from langchain_core.documents import Document
 from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
 from qdrant_client import QdrantClient
 
+from langchain_text_splitters import TokenTextSplitter
+from ragas.testset.synthesizers.single_hop.specific import SingleHopSpecificQuerySynthesizer
+from ragas.testset.synthesizers.multi_hop.abstract import MultiHopAbstractQuerySynthesizer
 from app.rag.ingest import QDRANT_URL, get_embeddings
 from app.rag.retrieve import rerank
 from app.parsers.parsers import parse
@@ -26,14 +29,18 @@ def _get_generator_llm(provider: str, model: str):
         return ChatOpenAI(model=model, api_key=os.environ["OPENAI_API_KEY"])
     elif provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
-        return ChatGoogleGenerativeAI(model=model, google_api_key=os.environ["GOOGLE_API_KEY"], convert_system_message_to_human=True, model_kwargs={"response_mime_type": "application/json"})
-    raise ValueError(f"Unknown generator provider: {provider}")
+        return ChatGoogleGenerativeAI(model=model, google_api_key=os.environ["GOOGLE_API_KEY"], convert_system_message_to_human=True, response_mime_type="application/json", model_kwargs={"thinking_config": {"thinking_budget": 0}})
+    raise ValueError(f"Unknown model provider: {provider}")
 
 
-def _generate_testset(docs: list[Document], size: int, generator_provider: str, generator_model: str, embeddings) -> list[dict]:
-    llm = _get_generator_llm(generator_provider, generator_model)
+def _generate_testset(chunks: list[Document], size: int, model_provider: str, model: str, embeddings) -> list[dict]:
+    llm = _get_generator_llm(model_provider, model)
     generator = TestsetGenerator.from_langchain(llm, embeddings)
-    result = generator.generate_with_langchain_docs(docs, testset_size=size)
+    query_distribution = [
+        (SingleHopSpecificQuerySynthesizer(llm=llm), 0.35),
+        (MultiHopAbstractQuerySynthesizer(llm=llm), 0.65)
+    ]
+    result = generator.generate_with_chunks(chunks, testset_size=size, query_distribution=query_distribution)
     testset = []
     for row in result.to_pandas().itertuples():
         testset.append({
@@ -52,7 +59,7 @@ def _load_or_generate_testset(file_path: str, docs: list[Document], args, embedd
                 raise ValueError("Each testset entry must have 'question' and 'reference_contexts' keys")
         return data
 
-    testset = _generate_testset(docs, args.testset_size, args.generator_provider, args.generator_model, embeddings)
+    testset = _generate_testset(docs, args.testset_size, args.model_provider, args.model, embeddings)
 
     if args.save_testset:
         with open(args.save_testset, "w") as f:
@@ -172,7 +179,7 @@ def _log_run(record: dict):
 def eval_retrieval(
     file_path: str,
     provider: str = "ollama",
-    model: str = "nomic-embed-text",
+    embedding_model: str = "nomic-embed-text",
     collection: str = "reachy_collection",
     sparse_model: str = "Qdrant/bm25",
     reranker: str = "cross-encoder",
@@ -180,18 +187,23 @@ def eval_retrieval(
     testset_size: int = 20,
     testset: str = None,
     save_testset: str = None,
-    generator_provider: str = "openai",
-    generator_model: str = "mistral",
+    model_provider: str = "openai",
+    model: str = "mistral",
     retriever_k: int = 20,
+    parser: str = "docling",
+    chunk_size: int = 400,
+    chunk_overlap: int = 60,
 ):
     file_path = os.path.abspath(file_path)
 
     # 1. Re-parse file for Ragas document objects
-    raw_pages = parse(file_path)
+    raw_pages = parse(file_path, parser=parser)
     docs = [Document(page_content=text, metadata={"source": file_path, "page": i})
             for i, text in enumerate(raw_pages) if text.strip()]
+    splitter = TokenTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    chunks = splitter.split_documents(docs)
 
-    embeddings = get_embeddings(provider, model)
+    embeddings = get_embeddings(provider, embedding_model)
 
     # Namespace args for _load_or_generate_testset
     class _Args:
@@ -200,14 +212,22 @@ def eval_retrieval(
     _args.testset = testset
     _args.save_testset = save_testset
     _args.testset_size = testset_size
-    _args.generator_provider = generator_provider
-    _args.generator_model = generator_model
+    _args.model_provider = model_provider
+    _args.model = model
 
     # 2. Load or generate testset
-    testset_data = _load_or_generate_testset(file_path, docs, _args, embeddings)
+    testset_data = _load_or_generate_testset(file_path, chunks, _args, embeddings)
 
-    # 3. Build vector store
+    # 3. Ingest if collection doesn't exist
     client = QdrantClient(url=QDRANT_URL)
+    if not client.collection_exists(collection):
+        print(f"Collection '{collection}' not found. Ingesting {file_path}...")
+        from app.rag.ingest import ingest
+        n = ingest(file_path, provider=provider, model=embedding_model, collection=collection,
+                   parser=parser, sparse_model=sparse_model, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        print(f"Ingested {n} chunks.")
+
+    # 4. Build vector store
     sparse = FastEmbedSparse(model_name=sparse_model)
     store = QdrantVectorStore(
         client=client,
@@ -217,7 +237,7 @@ def eval_retrieval(
         retrieval_mode=RetrievalMode.HYBRID,
     )
 
-    # 4. Evaluate each question
+    # 5. Evaluate each question
     stage1_metrics = []
     stage2_metrics = []
     stage1_at_topn_metrics = []
@@ -237,7 +257,7 @@ def eval_retrieval(
         stage1_diversity.append(_chunk_diversity(candidates))
         stage2_diversity.append(_chunk_diversity(final))
 
-    # 5. Average and compute delta
+    # 6. Average and compute delta
     stage1_avg = _avg(stage1_metrics)
     stage2_avg = _avg(stage2_metrics)
     stage1_at_topn_avg = _avg(stage1_at_topn_metrics)
@@ -247,7 +267,7 @@ def eval_retrieval(
         "stage2": float(np.mean(stage2_diversity)),
     }
 
-    # 6. Print report
+    # 7. Print report
     _print_report(file_path, len(testset_data), reranker, top_n,
                   stage1_avg, stage2_avg, delta, retriever_k, avg_diversity)
 
@@ -257,7 +277,7 @@ def eval_retrieval(
         "file": file_path,
         "collection": collection,
         "provider": provider,
-        "model": model,
+        "embedding_model": embedding_model,
         "reranker": reranker,
         "top_n": top_n,
         "retriever_k": retriever_k,
@@ -273,7 +293,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("file")
     parser.add_argument("--provider", choices=["openai", "ollama"], default="ollama")
-    parser.add_argument("--model", default="nomic-embed-text")
+    parser.add_argument("--embedding-model", default="nomic-embed-text", dest="embedding_model")
     parser.add_argument("--collection", default="reachy_collection")
     parser.add_argument("--sparse-model", default="Qdrant/bm25", dest="sparse_model")
     parser.add_argument("--reranker", choices=["cross-encoder", "cohere"], default="cross-encoder")
@@ -281,14 +301,17 @@ if __name__ == "__main__":
     parser.add_argument("--testset-size", type=int, default=20, dest="testset_size")
     parser.add_argument("--testset", default=None)
     parser.add_argument("--save-testset", default=None, dest="save_testset")
-    parser.add_argument("--generator-provider", choices=["ollama", "openai", "gemini"], default="ollama", dest="generator_provider")
-    parser.add_argument("--generator-model", default="mistral", dest="generator_model")
+    parser.add_argument("--model-provider", choices=["ollama", "openai", "gemini"], default="ollama", dest="model_provider")
+    parser.add_argument("--model", default="mistral", dest="model")
+    parser.add_argument("--parser", default="pdfplumber")
+    parser.add_argument("--chunk-size", type=int, default=400, dest="chunk_size")
+    parser.add_argument("--chunk-overlap", type=int, default=60, dest="chunk_overlap")
     args = parser.parse_args()
 
     eval_retrieval(
         file_path=args.file,
         provider=args.provider,
-        model=args.model,
+        embedding_model=args.embedding_model,
         collection=args.collection,
         sparse_model=args.sparse_model,
         reranker=args.reranker,
@@ -296,6 +319,9 @@ if __name__ == "__main__":
         testset_size=args.testset_size,
         testset=args.testset,
         save_testset=args.save_testset,
-        generator_provider=args.generator_provider,
-        generator_model=args.generator_model,
+        model_provider=args.model_provider,
+        model=args.model,
+        parser=args.parser,
+        chunk_size=args.chunk_size,
+        chunk_overlap=args.chunk_overlap,
     )

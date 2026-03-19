@@ -65,6 +65,30 @@ The metrics handle the asymmetry naturally:
 
 The only implicit assumption is that at least one reference context should be retrievable from your collection (i.e., it was ingested). If a reference context has no lexical overlap with any stored chunk, Recall will be stuck at 0 regardless of retrieval quality — but that's a testset quality issue, not a count mismatch.
 
+### Testset generation alignment with ingest pipeline
+
+Previously, `eval.py` passed raw page-level documents to Ragas for testset generation, while the actual chunks stored in Qdrant are 400-token windows. This caused a semantic mismatch: questions were grounded in full-page text that the retriever never sees as a unit.
+
+The fix (now in place): `eval.py` applies the same `TokenTextSplitter(chunk_size=400, chunk_overlap=60)` as `ingest.py` before handing documents to Ragas, and uses `generate_with_chunks()` which treats each input as a `NodeType.CHUNK` directly (skipping Ragas' internal chunking). The parser is also aligned — both eval and ingest now default to `docling`.
+
+This means reference contexts in the testset are chunk-sized passages from the same chunking strategy as what's in Qdrant, making Jaccard overlap a reliable relevance signal.
+
+### Query distribution
+
+Testset generation uses a custom `query_distribution` to control question type mix:
+
+```python
+query_distribution = [
+    (SingleHopSpecificQuerySynthesizer(llm=llm), 0.35),
+    (MultiHopAbstractQuerySynthesizer(llm=llm), 0.65),
+]
+```
+
+- **SingleHopSpecificQuerySynthesizer (35%)** — questions grounded in a single chunk; produce one `reference_context` per question
+- **MultiHopAbstractQuerySynthesizer (65%)** — questions that link concepts across two or more chunks; produce multiple `reference_contexts` per question
+
+At 65% multi-hop, most questions in the generated testset will have multiple reference contexts, making Recall a distinct and meaningful metric (not redundant with Hit@K).
+
 ### Chunk size and overlap decision
 
 The reference context token counts in the Ragas-generated testset (`ragas_testset.json`) were measured using tiktoken's `cl100k_base` encoding — the same tokenizer used by `TokenTextSplitter` in the ingest pipeline. The histogram of those counts shows:
@@ -79,19 +103,19 @@ Since reference contexts are consistently smaller than the chunk size, a retriev
 
 Reducing chunk size to ~200 tokens would align more tightly with the reference context distribution and is worth exploring as a production tuning decision (tighter chunks = less noise sent to the LLM). However, this is a retrieval quality concern, not an eval correctness issue. The current 400/60 settings are sufficient to proceed with offline evaluation without adjustment.
 
-### Effect of one reference context per question
+### Effect of reference context count on metrics
 
-Ragas by default generates one reference context per question. With a single reference context, Recall = relevant_found / 1, which is always 0.0 or 1.0 — making it **identical to Hit@K**. You effectively get 4 distinct signals instead of 5.
+With the current query distribution (65% multi-hop), most questions will have multiple reference contexts. This makes all 5 metrics distinct signals:
 
-| Metric | Affected? |
-|---|---|
-| Recall@K | Becomes binary — redundant with Hit@K |
-| Hit@K | Redundant with Recall |
-| Precision@K | Unaffected |
-| MRR | Unaffected — still measures rank of the one relevant chunk |
-| NDCG@K | Less discriminative but still valid |
+| Metric | With single ref context | With multiple ref contexts |
+|---|---|---|
+| Recall@K | Binary — redundant with Hit@K | Meaningful — partial credit possible |
+| Hit@K | Redundant with Recall | Independent signal |
+| Precision@K | Unaffected | Unaffected |
+| MRR | Unaffected | Unaffected |
+| NDCG@K | Less discriminative | More discriminative |
 
-This does not break the eval — MRR, Precision, and NDCG still give meaningful signal. If you want Recall to be a distinct metric, hand-annotate a subset of questions with multiple reference contexts, or adjust the Ragas generation prompt to produce more.
+Single-hop questions (35%) still produce one reference context, so Recall = Hit for those — but averaged across the full testset, Recall will reflect partial retrieval across the multi-hop majority.
 
 ---
 
