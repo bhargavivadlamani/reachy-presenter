@@ -24,7 +24,7 @@ def get_embeddings(provider: str, model: str):
         return OllamaEmbeddings(model=model)
     raise ValueError(f"Unknown provider: {provider}")
 
-def ingest(file_path: str, provider: str = "ollama", model: str = "nomic-embed-text", collection: str = "reachy_collection", parser: str = "docling", sparse_model: str = "Qdrant/bm25", chunk_size: int = 400, chunk_overlap: int = 60) -> int:
+def ingest(file_path: str, provider: str = "ollama", model: str = "nomic-embed-text", collection: str = "reachy_collection", parser: str = "pdfplumber", sparse_model: str = "Qdrant/bm25", chunk_size: int = 400, chunk_overlap: int = 60) -> int:
     file_path = os.path.abspath(file_path)
     with open(file_path, "rb") as f:
         doc_id = hashlib.sha256(f.read()).hexdigest()
@@ -83,7 +83,7 @@ if __name__ == "__main__":
     parser.add_argument("--provider", choices=["openai", "ollama"], default="ollama")
     parser.add_argument("--model", default="nomic-embed-text")
     parser.add_argument("--collection", default="reachy_collection")
-    parser.add_argument("--parser", default="docling")
+    parser.add_argument("--parser", default="pdfplumber")
     parser.add_argument("--sparse-model", default="Qdrant/bm25", dest="sparse_model")
     parser.add_argument("--chunk-size", type=int, default=400, dest="chunk_size")
     parser.add_argument("--chunk-overlap", type=int, default=60, dest="chunk_overlap")
