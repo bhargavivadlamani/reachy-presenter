@@ -2,13 +2,14 @@
 
 import argparse, os
 from dotenv import load_dotenv
+load_dotenv()
+
 from langchain_core.documents import Document
 from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
+from langsmith import traceable
 from qdrant_client import QdrantClient
 from sentence_transformers import CrossEncoder
 from app.rag.ingest import QDRANT_URL, get_embeddings
-
-load_dotenv()
 
 CROSS_ENCODER_MODEL = os.getenv("CROSS_ENCODER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 _cross_encoder = CrossEncoder(CROSS_ENCODER_MODEL)
@@ -21,13 +22,13 @@ def rerank(query: str, chunks: list[Document], reranker: str = "cross-encoder", 
         return _rerank_cohere(query, chunks, top_k)
     raise ValueError(f"Unknown reranker: {reranker}")
 
-
+@traceable(name="rerank using cross encoder")
 def _rerank_cross_encoder(query: str, chunks: list[Document], top_k: int) -> list[Document]:
     scores = _cross_encoder.predict([(query, c.page_content) for c in chunks])
     ranked = sorted(zip(scores, chunks), key=lambda x: x[0], reverse=True)
     return [c for _, c in ranked[:top_k]]
 
-
+@traceable(name="rerank using cohere")
 def _rerank_cohere(query: str, chunks: list[Document], top_k: int) -> list[Document]:
     import cohere  # optional dep — install separately if using this reranker
     co = cohere.Client(os.environ["COHERE_API_KEY"])
@@ -49,6 +50,7 @@ def build_context(chunks: list[Document]) -> str:
     return "\n\n".join(parts)
 
 
+@traceable(name="retrieval_run")
 def retrieve(
     query: str,
     collection: str = "reachy_collection",
@@ -89,7 +91,11 @@ def retrieve(
         retrieval_mode=RetrievalMode.HYBRID,
     )
 
-    candidates = store.similarity_search(query, k=retriever_k)
+    @traceable(name="hybrid_search")
+    def hybrid_search(q: str) -> list[Document]:
+        return store.similarity_search(q, k=retriever_k)
+
+    candidates = hybrid_search(query)
     return rerank(query, candidates, reranker=reranker, top_k=top_n)
 
 
