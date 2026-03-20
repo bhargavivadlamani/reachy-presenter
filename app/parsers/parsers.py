@@ -10,8 +10,12 @@ def parse(file_path: str, parser: str = "pdfplumber") -> list[str]:
 def _parse_docling(path: str) -> list[str]:
     from docling.document_converter import DocumentConverter
     from docling.chunking import HybridChunker
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
 
-    converter = DocumentConverter()
+    pipeline_options = PdfPipelineOptions(do_ocr=False)
+    converter = DocumentConverter(
+        format_options={"pdf": {"pipeline_options": pipeline_options}}
+    )
     result = converter.convert(path)
 
     if result.status.name == "FAILURE":
