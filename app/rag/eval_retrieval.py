@@ -191,7 +191,7 @@ def _print_report(file_path: str, n_questions: int, reranker: str, top_n: int,
 
 def _log_run(record: dict):
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    log_dir = os.path.join(os.path.dirname(__file__), "offline_eval_logs")
+    log_dir = os.path.join(os.path.dirname(__file__), "eval_logs")
     log_path = os.path.join(log_dir, f"eval_{ts}.json")
     with open(log_path, "w") as f:
         json.dump(record, f, indent=2)

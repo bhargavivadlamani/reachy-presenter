@@ -136,7 +136,7 @@ def eval_generation(
 
     # 8. Log run
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    log_dir = os.path.join(os.path.dirname(__file__), "offline_eval_logs")
+    log_dir = os.path.join(os.path.dirname(__file__), "eval_logs")
     log_path = os.path.join(log_dir, f"eval_gen_{ts}.json")
     with open(log_path, "w") as f:
         json.dump({
