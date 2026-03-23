@@ -1,0 +1,16 @@
+{
+  "timestamp": "2026-03-23T20:16:19.849835+00:00",
+  "file": "C:\\Users\\likhi\\OneDrive\\Desktop\\Reading Materials\\Multi-Agent Systems.pdf",
+  "collection": "eval-gen-collection",
+  "gen_provider": "openai",
+  "gen_model": "gpt-4o-mini",
+  "n_questions": 100,
+  "metrics_computed": [
+    "faithfulness",
+    "answer_relevancy",
+    "answer_correctness"
+  ],
+  "faithfulness": 0.8300595238095237,
+  "answer_relevancy": 0.7985730767058319,
+  "answer_correctness": NaN
+}

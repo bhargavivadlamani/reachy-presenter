@@ -21,7 +21,14 @@ _PROMPT = ChatPromptTemplate.from_messages([
 def _get_llm(provider: str, model: str):
     if provider == "openai":
         from langchain_openai import ChatOpenAI
-        return ChatOpenAI(model=model, api_key=os.environ["OPENAI_API_KEY"])
+        from langchain_core.rate_limiters import InMemoryRateLimiter
+        rate_limiter = InMemoryRateLimiter(requests_per_second=1/6)
+        return ChatOpenAI(
+            model=model, 
+            api_key=os.environ["OPENAI_API_KEY"], 
+            base_url=os.environ["OPENAI_BASE_URL"], 
+            rate_limiter=rate_limiter 
+        )
     elif provider == "ollama":
         from langchain_ollama import ChatOllama
         return ChatOllama(model=model)

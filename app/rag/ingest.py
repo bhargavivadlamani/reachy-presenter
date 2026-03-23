@@ -95,7 +95,7 @@ if __name__ == "__main__":
     print(f"Ingested {n} chunks from {args.file} using {args.provider}")
 
     if args.eval:
-        from app.rag.eval import eval_retrieval
+        from app.rag.eval_retrieval import eval_retrieval
         eval_retrieval(
             file_path=args.file,
             provider=args.provider,

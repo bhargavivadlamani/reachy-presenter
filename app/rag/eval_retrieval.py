@@ -1,4 +1,4 @@
-# python -m app.rag.eval path/to/file.pdf [options]
+# python -m app.rag.eval_retrieval path/to/file.pdf [options]
 # See app/rag/README.md for full documentation.
 
 import argparse, json, math, os
@@ -6,39 +6,51 @@ from datetime import datetime, timezone
 import numpy as np
 from dotenv import load_dotenv
 from langchain_core.documents import Document
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
 from qdrant_client import QdrantClient
-
 from langchain_text_splitters import TokenTextSplitter
 from ragas.testset.synthesizers.single_hop.specific import SingleHopSpecificQuerySynthesizer
-from ragas.testset.synthesizers.multi_hop.abstract import MultiHopAbstractQuerySynthesizer
+from ragas.testset.synthesizers.multi_hop.specific import MultiHopSpecificQuerySynthesizer
 from app.rag.ingest import QDRANT_URL, get_embeddings
 from app.rag.retrieve import rerank
 from app.parsers.parsers import parse
 from ragas.testset import TestsetGenerator
 from langchain_ollama import ChatOllama
 
+_REFERENCE_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", "Answer the question based solely on the provided context. Be concise."),
+    ("human", "Context:\n{context}\n\nQuestion: {question}"),
+])
+
 load_dotenv()
 
 
-def _get_generator_llm(provider: str, model: str):
+def _get_generator_llm(provider: str, model: str, json_mode: bool = False):
     if provider == "ollama":
         return ChatOllama(model=model)
     elif provider == "openai":
         from langchain_openai import ChatOpenAI
-        return ChatOpenAI(model=model, api_key=os.environ["OPENAI_API_KEY"])
+        from langchain_core.rate_limiters import InMemoryRateLimiter
+        rate_limiter = InMemoryRateLimiter(requests_per_second=1/6)
+        kwargs = {"model_kwargs": {"response_format": {"type": "json_object"}}} if json_mode else {}
+        return ChatOpenAI(model=model, api_key=os.environ["OPENAI_API_KEY"], rate_limiter=rate_limiter, **kwargs)
     elif provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
         return ChatGoogleGenerativeAI(model=model, google_api_key=os.environ["GOOGLE_API_KEY"], convert_system_message_to_human=True, response_mime_type="application/json", model_kwargs={"thinking_config": {"thinking_budget": 0}})
     raise ValueError(f"Unknown model provider: {provider}")
 
 
-def _generate_testset(chunks: list[Document], size: int, model_provider: str, model: str, embeddings) -> list[dict]:
+def _generate_testset(chunks: list[Document], size: int, model_provider: str, model: str, embeddings, with_reference_answers: bool = False) -> list[dict]:
     llm = _get_generator_llm(model_provider, model)
-    generator = TestsetGenerator.from_langchain(llm, embeddings)
+    ragas_llm = _get_generator_llm(model_provider, model, json_mode=True)
+    # LangChain's structured output methods (.with_structured_output(), .bind()) wrap the LLM in a RunnableSequence or RunnableBinding — they return a chain, not a ChatOpenAI instance.
+    # Ragas's TestsetGenerator expects a raw LLM object and calls it internally using its own prompting/parsing logic. It accesses attributes like .temperature directly on the object, which breaks the moment you wrap it in any Runnable.
+    generator = TestsetGenerator.from_langchain(ragas_llm, embeddings)
     query_distribution = [
-        (SingleHopSpecificQuerySynthesizer(llm=llm), 0.35),
-        (MultiHopAbstractQuerySynthesizer(llm=llm), 0.65)
+        (SingleHopSpecificQuerySynthesizer(llm=ragas_llm), 0.35),
+        (MultiHopSpecificQuerySynthesizer(llm=ragas_llm), 0.65)
     ]
     result = generator.generate_with_chunks(chunks, testset_size=size, query_distribution=query_distribution)
     testset = []
@@ -47,6 +59,11 @@ def _generate_testset(chunks: list[Document], size: int, model_provider: str, mo
             "question": row.user_input,
             "reference_contexts": list(row.reference_contexts),
         })
+    if with_reference_answers:
+        chain = _REFERENCE_PROMPT | llm | StrOutputParser()
+        for entry in testset:
+            ctx = "\n\n".join(entry["reference_contexts"])
+            entry["reference_answer"] = chain.invoke({"context": ctx, "question": entry["question"]})
     return testset
 
 
@@ -57,14 +74,19 @@ def _load_or_generate_testset(file_path: str, docs: list[Document], args, embedd
         for item in data:
             if "question" not in item or "reference_contexts" not in item:
                 raise ValueError("Each testset entry must have 'question' and 'reference_contexts' keys")
+            # 'reference_answer' is optional — present enables Answer Correctness in generation eval
         return data
 
     testset = _generate_testset(docs, args.testset_size, args.model_provider, args.model, embeddings)
 
-    if args.save_testset:
-        with open(args.save_testset, "w") as f:
-            json.dump(testset, f, indent=2)
-        print(f"Testset saved to {args.save_testset}")
+    save_path = args.save_testset
+    if not save_path:
+        data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+        stem = os.path.splitext(os.path.basename(file_path))[0]
+        save_path = os.path.join(data_dir, f"{stem}_testset.json")
+    with open(save_path, "w") as f:
+        json.dump(testset, f, indent=2)
+    print(f"Testset saved to {save_path}")
 
     return testset
 
@@ -178,7 +200,7 @@ def _log_run(record: dict):
 
 def eval_retrieval(
     file_path: str,
-    provider: str = "ollama",
+    embedding_provider: str = "ollama",
     embedding_model: str = "nomic-embed-text",
     collection: str = "reachy_collection",
     sparse_model: str = "Qdrant/bm25",
@@ -203,7 +225,7 @@ def eval_retrieval(
     splitter = TokenTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     chunks = splitter.split_documents(docs)
 
-    embeddings = get_embeddings(provider, embedding_model)
+    embeddings = get_embeddings(embedding_provider, embedding_model)
 
     # Namespace args for _load_or_generate_testset
     class _Args:
@@ -276,7 +298,7 @@ def eval_retrieval(
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "file": file_path,
         "collection": collection,
-        "provider": provider,
+        "embedding_provider": embedding_provider,
         "embedding_model": embedding_model,
         "reranker": reranker,
         "top_n": top_n,
@@ -292,7 +314,7 @@ def eval_retrieval(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("file")
-    parser.add_argument("--provider", choices=["openai", "ollama"], default="ollama")
+    parser.add_argument("--embedding-provider", choices=["openai", "ollama"], default="ollama", dest="embedding_provider")
     parser.add_argument("--embedding-model", default="nomic-embed-text", dest="embedding_model")
     parser.add_argument("--collection", default="reachy_collection")
     parser.add_argument("--sparse-model", default="Qdrant/bm25", dest="sparse_model")
@@ -310,7 +332,7 @@ if __name__ == "__main__":
 
     eval_retrieval(
         file_path=args.file,
-        provider=args.provider,
+        embedding_provider=args.embedding_provider,
         embedding_model=args.embedding_model,
         collection=args.collection,
         sparse_model=args.sparse_model,
