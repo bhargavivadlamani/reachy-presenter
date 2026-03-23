@@ -1,0 +1,10 @@
+google-genai
+mediapipe
+pdf2image
+pdfplumber
+Pillow
+python-dotenv
+python-pptx
+reachy-mini
+numpy
+scipy
