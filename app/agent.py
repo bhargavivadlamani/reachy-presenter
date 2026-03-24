@@ -322,7 +322,13 @@ async def _run_cli_async() -> None:
 
 if __name__ == "__main__":
     import sys
-    if "--audio" in sys.argv:
+    if "--robot" in sys.argv:
+        mini = ReachyMini()
+        set_mini(mini)
+        print("Connected to robot. Just start talking.\n")
+        with mini:
+            run_for_robot(mini)
+    elif "--audio" in sys.argv:
         set_mini(ReachyMini(
             connection_mode="localhost_only",
             timeout=5.0,
