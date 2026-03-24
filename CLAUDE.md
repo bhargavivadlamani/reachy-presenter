@@ -1,129 +1,126 @@
 # Reachy Mini Presenter — Project Context
 
 ## What This Project Does
-Reachy Mini robot autonomously presents PDF/PPTX slide decks. It:
-1. Parses slides as images (vision-based, not text extraction)
-2. Sends each slide image to Gemini Flash to generate a spoken script + classify emotion
-3. Uses Gemini Live API for TTS, VAD, echo cancellation, and live Q&A natively
-4. Moves expressively: slide transitions, emotion gestures, face tracking during speech
+Reachy Mini robot agent powered by Google ADK + Gemini Bidi streaming. It:
+1. Runs as a persistent conversational agent — always listening, never locked into a fixed workflow
+2. `load_presentation(file_path)` tool: parses PDF/PPTX, generates spoken scripts via GPT-4o vision
+3. `present_slide(slide_number)` tool: performs robot gesture, signals agent to read script via bidi TTS
+4. Native bidi audio (Gemini Live): no separate TTS/STT, built-in VAD + interruption handling
 
-Run: `python -m app.main path/to/slides.pdf`
+Run agent (simulator): `python -m app.agent --audio`
+Run agent (text CLI):   `python -m app.agent`
+Real robot: call `set_mini(mini)` then `run_for_robot(mini)` from `app.agent`
 
 ## Project Layout
 ```
 app/
-  main.py                  # Entry point: parses slides, generates scripts, runs presentation loop
+  agent.py                  # ACTIVE: ADK agent, bidi streaming loop, run_for_robot(), run_audio_conversation()
+  system_prompt.md          # Agent persona + tool instructions (loaded at runtime)
+  audio_helpers/
+    __init__.py             # MIC_SR=16000, GEM_SR=24000, VAD_THRESHOLD=0.02, to_pcm_bytes(), decode_pcm()
+  tools/
+    present_slide.py        # ADK tool: slide_transition gesture + return script for agent TTS
+                            # Also owns _mini_ref + set_mini() — call set_mini() before audio session
+    load_presentation.py    # ADK tool: parse file, generate scripts, store in module state
+    generate_script.py      # Helper re-export from gemini_client (not an ADK tool — takes PIL image)
   llm/
-    gemini_client.py       # Gemini Flash: generate_script(), classify_slide(), transcribe_audio(), answer_question()
+    gemini_client.py        # generate_script(PIL_image), classify_slide(PIL_image) via FAU TRUSSED/GPT-4o
   parsers/
-    pdf_parser.py          # PDF → PIL Images via pdf2image (150 DPI)
-    pptx_parser.py         # PPTX → PIL Images via LibreOffice → pdf2image
+    pdf_parser.py           # PDF → PIL Images via pdf2image (150 DPI)
+    pptx_parser.py          # PPTX → PIL Images via LibreOffice → pdf2image
   robot/
-    live_presenter.py      # ACTIVE: Gemini Live API — TTS + mic VAD + Q&A in one streaming session
-    gestures.py            # slide_transition() and emotion_gesture() using reachy_mini SDK
-    vision.py              # MediaPipe face tracking thread (track_faces_during_speech)
-    tts.py                 # DEAD CODE — replaced by live_presenter.py
-    qa_handler.py          # DEAD CODE — replaced by live_presenter.py (Gemini Live handles Q&A natively)
-  llm/
-    openai_client.py       # DEAD CODE — fully replaced by gemini_client.py
+    gestures.py             # slide_transition(), emotion_gesture() via reachy_mini SDK
 ```
 
 ## Environment
-- `.env` file needs `GEMINI_API_KEY=...`
-- Robot hostname: `reachy-mini.local`, user: `pollen`
-- Robot project path: `~/reachy-presenter/`
-- Run via: `cd ~/reachy-presenter && python -m app.main slides.pdf`
+- `.env` needs `GEMINI_API_KEY=...` (Gemini bidi) and `OPENAI_API_KEY=...` (FAU TRUSSED proxy)
+- Robot hostname: `reachy-mini.local`, user: `pollen`, project path: `~/reachy-presenter/`
 
 ## Tech Stack
-- `google-genai` — Gemini Flash (`gemini-2.0-flash`) for vision/script/classify; Gemini Live (`gemini-2.0-flash-live-001`) for speech
-- `sounddevice` — captures mic audio (16kHz 16-bit PCM) to stream to Gemini Live
-- `mediapipe` — BlazeFace face detection for audience eye contact (model_selection=0, short-range, avoids aarch64 protobuf bug)
-- `scipy` — resample Gemini's 24kHz output to robot's native sample rate
-- `reachy-mini` — robot SDK: `goto_target`, `set_target`, `look_at_image`, `media.push_audio_sample`, `media.get_frame`
+- `google-adk` — `Agent`, `Runner`, `InMemorySessionService`, `LiveRequestQueue`, `StreamingMode.BIDI`
+- `google-genai` — Gemini Bidi (`gemini-2.5-flash-native-audio-preview-12-2025`) for live audio
+- `openai` — FAU TRUSSED proxy (GPT-4o vision) for script generation
+- `sounddevice` — PC mic/speaker I/O, callback-based (`blocksize=512`, `latency=low`)
+- `scipy` — resample audio between hardware SR and Gemini's 16kHz in / 24kHz out
+- `reachy-mini` — robot SDK: `goto_target`, `set_target`, `media.push_audio_sample`
 - `pdf2image` + `pdfplumber` — PDF parsing
-- `python-pptx` + LibreOffice — PPTX parsing (LibreOffice must be installed: `sudo apt-get install libreoffice poppler-utils`)
+- `python-pptx` + LibreOffice — PPTX parsing
 
-## Architecture: Per-Slide Flow
+## Architecture: agent.py
+
+### Modes
+- `python -m app.agent --audio`: connects to simulator (`localhost_only`, `no_media`), sounddevice for audio
+- `python -m app.agent`: text CLI via `run_async`, no robot needed
+- `run_for_robot(mini)`: real robot — owns media lifecycle (start/stop playing+recording)
+
+### Bidi streaming loop (`_run_bidi_async`)
 ```
-1. slide_transition(mini)        ~1.2s  glance down → look up (checking notes)
-2. emotion_gesture(mini, tone)   ~0.6–1.1s  expressive move based on slide tone
-3. present_slide(mini, script, document_text)
-   ├── Gemini Live session opens
-   ├── Script text sent → Gemini speaks it (TTS via AUDIO modality, voice "Aoede")
-   ├── Thread A: mic_reader() → streams 16kHz PCM chunks to Gemini Live (VAD + AEC built-in)
-   ├── Thread B: receive_audio() → plays Gemini's 24kHz output through robot speaker
-   ├── Thread C: track_faces_during_speech() → MediaPipe face detection at 4Hz, head tracking
-   ├── Audience can interrupt at any time — Gemini Live handles it natively
-   └── On turn_complete → wait 2s for follow-up → done.set() → advance to next slide
+upstream():   mic frames -> to_pcm_bytes() -> send_realtime() -> Gemini Live
+downstream(): Gemini events -> inline_data -> decode_pcm() -> push_audio()
+                            -> interrupted -> clear_audio()
+                            -> turn_complete -> unmute_audio() + idle timer reset
+idle timer:   30s after last turn_complete -> done.set() -> session closes
 ```
 
-## Key Implementation Details
+### Interruption handling (sounddevice mode)
+```
+mic callback: speech detected while bot playing (RMS > VAD_THRESHOLD)
+  -> muted=True, interrupted=True  [local, immediate, no network round-trip]
+turn_complete from server:
+  -> _unmute(): if interrupted flag -> flush queue + out_stream.abort/start + unmute
+event.interrupted from server (belt and suspenders):
+  -> _clear(): same flush
+```
+Key: `_push()` never touches `muted`. Only `_flush_and_unmute()` unmutes — prevents old queued audio replaying after interruption.
 
-### live_presenter.py
-- Uses `asyncio.run(_run(...))` per slide — blocks until slide + Q&A complete
-- Gemini Live requires `api_version="v1beta"` (different from `v1` used by generate_content)
-- `done = asyncio.Event()` — set when `server_content.turn_complete` received
-- `mic_queue` bridges sync sounddevice thread → async Gemini send coroutine via `loop.call_soon_threadsafe`
-- Audio format in: `audio/pcm;rate=16000` (16kHz int16 PCM)
-- Audio format out: 24kHz int16 PCM → float32 → scipy_resample → `mini.media.push_audio_sample`
+### Audio constants (app/audio_helpers/__init__.py)
+- `VAD_THRESHOLD = 0.02` — RMS amplitude for local speech detection. Raise if ambient noise triggers it.
+- `MIC_SR = 16000`, `GEM_SR = 24000` — Gemini Live wire format
 
-### vision.py
-- `track_faces_during_speech(mini, stop_event: threading.Event)` — stops when event is set
-- `model_selection=0` (short-range) — model_selection=1 crashes on aarch64 Linux (protobuf bug)
-- BGR→RGB: `frame[:, :, ::-1].copy()` — no cv2 needed, must be C-contiguous for MediaPipe
-- Fallback when no face: slow sinusoidal yaw scan via `mini.set_target(head=create_head_pose(yaw=...))`
+### Tools
+- `present_slide(slide_number, script, document_text)` — gesture + return script for agent to speak
+  - `_mini_ref` lives in `app/tools/present_slide.py`; call `set_mini(mini)` before session starts
+  - `slide_number` looks up pre-generated script from `load_presentation` state
+- `load_presentation(file_path)` — parses file, calls `generate_script` per slide (7s delay between for rate limit), stores scripts + document_text in module state
 
 ### gemini_client.py
-- Two separate clients: `api_version="v1"` for generate_content, `api_version="v1beta"` for Live
-- `generate_script(PIL_image)` → spoken script for slide
-- `classify_slide(PIL_image)` → one of: excited / neutral / questioning / serious
-- `transcribe_audio(wav_bytes)` → Gemini audio transcription (fallback, Live API handles this natively now)
-- `answer_question(question, document_text)` → 2-3 sentence spoken answer (fallback, Live handles this)
-- Rate limit: 2-second sleep between calls to stay within free tier (15 req/min)
+- Uses FAU TRUSSED OpenAI-compatible proxy (`https://fauengtrussed.fau.edu/provider/generic`)
+- `generate_script(PIL_image)` → 4-6 sentence spoken script
+- `classify_slide(PIL_image)` → excited / neutral / questioning / serious
 
 ### gestures.py
 - `slide_transition`: pitch -20° (minjerk 0.5s) → neutral (ease_in_out 0.7s)
-- `emotion_gesture("excited")`: antennas 40° + pitch 8° (cartoon) → neutral
+- `emotion_gesture("excited")`: antennas 40° + pitch 8° → neutral
 - `emotion_gesture("questioning")`: roll 12° → neutral
 - `emotion_gesture("serious")`: pitch -5° + antennas -15°
-- `emotion_gesture("neutral")`: return to neutral
 
 ## Installing on Robot
 ```bash
-# SSH into robot
 ssh pollen@reachy-mini.local
-
-# In project venv
 cd ~/reachy-presenter
-pip install google-genai sounddevice mediapipe scipy
+pip install google-adk google-genai openai sounddevice scipy
 
-# For PPTX support
+# PPTX support
 sudo apt-get install libreoffice poppler-utils
-
-# Uninstall old stuff (no longer needed)
-pip uninstall openai edge-tts pynput -y
 ```
 
-## Deploying Changes from Mac
+## Deploying Changes
 ```bash
-# From Desktop/Reachy-Presenter/reachy-presenter/
-scp app/robot/live_presenter.py pollen@reachy-mini.local:~/reachy-presenter/app/robot/live_presenter.py
-scp app/robot/vision.py         pollen@reachy-mini.local:~/reachy-presenter/app/robot/vision.py
-scp app/robot/gestures.py       pollen@reachy-mini.local:~/reachy-presenter/app/robot/gestures.py
-scp app/main.py                 pollen@reachy-mini.local:~/reachy-presenter/app/main.py
-scp app/llm/gemini_client.py    pollen@reachy-mini.local:~/reachy-presenter/app/llm/gemini_client.py
-scp requirements.txt            pollen@reachy-mini.local:~/reachy-presenter/requirements.txt
+scp app/agent.py                         pollen@reachy-mini.local:~/reachy-presenter/app/agent.py
+scp app/system_prompt.md                 pollen@reachy-mini.local:~/reachy-presenter/app/system_prompt.md
+scp app/audio_helpers/__init__.py        pollen@reachy-mini.local:~/reachy-presenter/app/audio_helpers/__init__.py
+scp app/tools/present_slide.py           pollen@reachy-mini.local:~/reachy-presenter/app/tools/present_slide.py
+scp app/tools/load_presentation.py       pollen@reachy-mini.local:~/reachy-presenter/app/tools/load_presentation.py
+scp app/robot/gestures.py               pollen@reachy-mini.local:~/reachy-presenter/app/robot/gestures.py
+scp app/llm/gemini_client.py            pollen@reachy-mini.local:~/reachy-presenter/app/llm/gemini_client.py
+scp requirements.txt                     pollen@reachy-mini.local:~/reachy-presenter/requirements.txt
 ```
 
 ## Common Issues & Fixes
-- **MediaPipe crash on aarch64**: use `model_selection=0`, NOT 1 (full-range model has protobuf parse error on ARM)
-- **Gemini Live needs v1beta**: `http_options={"api_version": "v1beta"}` in the client for live_presenter.py
-- **generate_content uses v1**: separate `genai.Client` with `api_version="v1"` in gemini_client.py
-- **sounddevice mic**: if robot has multiple audio devices, may need to set `sd.default.device`
-- **scp new file fails**: the directory must already exist on robot. Check with `ssh pollen@reachy-mini.local "ls ~/reachy-presenter/app/robot/"`
-- **Rate limit**: free Gemini tier is 15 req/min — `time.sleep(2)` between calls in main.py pre-generation loop
-
-## What's Dead Code (don't touch, don't use)
-- `app/robot/tts.py` — old edge-tts based TTS, superseded by Gemini Live
-- `app/robot/qa_handler.py` — old sounddevice VAD + Gemini transcription Q&A, superseded by Gemini Live
-- `app/llm/openai_client.py` — old OpenAI GPT-4o calls, fully replaced by gemini_client.py
+- **Bot stays silent / doesn't respond**: `VAD_THRESHOLD` too low — ambient noise muting output; raise it in `audio_helpers/__init__.py`
+- **Interruption lag**: same threshold — lower = faster cut but triggers on noise
+- **No audio on simulator**: `media_backend="no_media"` — audio is sounddevice only, not GStreamer
+- **ADK bidi model**: must use `gemini-2.5-flash-native-audio-preview-12-2025`; regular models don't support `bidiGenerateContent`
+- **Script generation rate limit**: FAU TRUSSED ~10 req/min — `load_presentation` waits 7s between slides
+- **sounddevice device**: if multiple audio devices, set `sd.default.device` before `run_audio_conversation()`
+- **MediaPipe (if re-added)**: use `model_selection=0` on aarch64 — model_selection=1 crashes (protobuf bug)

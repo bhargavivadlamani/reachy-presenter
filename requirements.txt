@@ -1,4 +1,5 @@
 google-genai
+google-adk
 mediapipe
 pdf2image
 pdfplumber
