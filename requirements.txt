@@ -1,6 +1,7 @@
-google-genai
-google-adk
-mediapipe
+google-genai==1.68.0
+google-adk==1.19.0
+openai
+sounddevice
 pdf2image
 pdfplumber
 Pillow

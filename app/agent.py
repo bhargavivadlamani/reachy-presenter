@@ -114,8 +114,9 @@ async def _run_bidi_async(
             live_queue.send_content(
                 types.Content(role="user", parts=[types.Part(text=initial_text)])
             )
+        loop = asyncio.get_event_loop()
         while not done.is_set():
-            frame = get_audio_frame()
+            frame = await loop.run_in_executor(None, get_audio_frame)
             if frame is None:
                 await asyncio.sleep(0.01)
                 continue
@@ -169,10 +170,14 @@ def run_for_robot(mini: ReachyMini) -> None:
     def _get_frame() -> Optional[np.ndarray]:
         return mini.media.get_audio_sample()
 
+    robot_out_channels = mini.media.get_output_channels()
+
     def _push(samples: np.ndarray) -> None:
         if robot_out_sr != GEM_SR:
             n = int(len(samples) * robot_out_sr / GEM_SR)
             samples = scipy_resample(samples, n).astype(np.float32)
+        if robot_out_channels > 1 and samples.ndim == 1:
+            samples = np.stack([samples] * robot_out_channels, axis=1)
         mini.media.push_audio_sample(samples)
 
     mini.media.start_playing()
