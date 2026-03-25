@@ -30,8 +30,23 @@ def present_slide(script: str = "", slide_number: int = 0, document_text: str = 
         Confirmation with the script to read aloud.
     """
     if slide_number > 0:
-        from app.tools.load_presentation import get_slide_script, get_document_text
-        script = get_slide_script(slide_number) or script
+        from app.tools.load_presentation import (
+            get_slide_script, get_document_text, get_slide_count,
+            get_total_slides, is_generating,
+        )
+        fetched = get_slide_script(slide_number)
+        if fetched is None:
+            ready, total = get_slide_count(), get_total_slides()
+            if is_generating():
+                return (
+                    f"Slide {slide_number} isn't ready yet — {ready} of {total} scripts generated so far. "
+                    f"Wait a few seconds and try again."
+                )
+            elif total == 0:
+                return "No presentation has been loaded yet."
+            else:
+                return f"Slide {slide_number} not found — only {ready} slides are loaded."
+        script = fetched
         if not document_text:
             document_text = get_document_text()
 

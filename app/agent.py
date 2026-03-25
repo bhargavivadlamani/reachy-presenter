@@ -36,14 +36,23 @@ from app.tools.load_presentation import load_presentation
 load_dotenv()
 
 # ADK logs WebSocket close errors before we handle them — suppress the noise
-logging.getLogger("google.adk.flows.llm_flows.base_llm_flow").setLevel(logging.CRITICAL)
+for _noisy_logger in (
+    "google.adk.flows.llm_flows.base_llm_flow",
+    "google_adk.google.adk.flows.llm_flows.base_llm_flow",
+):
+    logging.getLogger(_noisy_logger).setLevel(logging.CRITICAL)
+logging.getLogger("google.adk.models.google_llm").setLevel(logging.DEBUG)
+logging.getLogger("google_adk.google.adk.models.google_llm").setLevel(logging.DEBUG)
 
 _MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
 _APP_NAME = "reachy-presenter"
 _USER_ID = "presenter"
 _SESSION_ID = "main"
+_PRESENTATION_PATH = Path("/home/pollen/ReachyMini1.pdf")
 
 _SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.md").read_text().strip()
+if _PRESENTATION_PATH.exists():
+    _SYSTEM_PROMPT += f"\n\nDefault presentation file: `{_PRESENTATION_PATH}`. When the user asks to start, give, or begin the presentation, call load_presentation() with this path."
 
 
 # ---------------------------------------------------------------------------
@@ -94,10 +103,13 @@ async def _run_bidi_async(
     run_config = RunConfig(
         streaming_mode=StreamingMode.BIDI,
         response_modalities=["AUDIO"],
+        output_audio_transcription=None,
+        input_audio_transcription=None,
     )
 
     done = asyncio.Event()
     idle_task: asyncio.Task | None = None
+    _last_idle_restart: float = 0.0
 
     def _restart_idle_timer() -> None:
         nonlocal idle_task
@@ -110,6 +122,7 @@ async def _run_bidi_async(
         idle_task = asyncio.create_task(_idle())
 
     async def upstream() -> None:
+        nonlocal _last_idle_restart
         if initial_text:
             live_queue.send_content(
                 types.Content(role="user", parts=[types.Part(text=initial_text)])
@@ -120,6 +133,12 @@ async def _run_bidi_async(
             if frame is None:
                 await asyncio.sleep(0.01)
                 continue
+            # Throttle timer restarts to once/sec — high-fps sources (e.g. 77fps
+            # robot mic) would otherwise thrash asyncio task creation/cancellation.
+            now = loop.time()
+            if now - _last_idle_restart >= 1.0:
+                _last_idle_restart = now
+                _restart_idle_timer()
             pcm = to_pcm_bytes(frame, mic_sr)
             live_queue.send_realtime(
                 types.Blob(mime_type="audio/pcm;rate=16000", data=pcm)
