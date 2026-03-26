@@ -45,7 +45,7 @@ def is_generating() -> bool:
 
 def _generate_background(images: list, basename: str) -> None:
     global _document_text, _generating
-    from app.llm.gemini_client import generate_script
+    from app.tools.generate_script import generate_script
 
     for i, image in enumerate(images, start=1):
         print(f"[load_presentation] Slide {i}/{len(images)} — generating script...")

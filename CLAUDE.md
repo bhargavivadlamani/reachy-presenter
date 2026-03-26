@@ -22,9 +22,7 @@ app/
     present_slide.py        # ADK tool: slide_transition gesture + return script for agent TTS
                             # Also owns _mini_ref + set_mini() — call set_mini() before audio session
     load_presentation.py    # ADK tool: parse file, generate scripts, store in module state
-    generate_script.py      # Helper re-export from gemini_client (not an ADK tool — takes PIL image)
-  llm/
-    gemini_client.py        # generate_script(PIL_image), classify_slide(PIL_image) via FAU TRUSSED/GPT-4o
+    generate_script.py      # generate_script(PIL_image) via FAU TRUSSED/GPT-4o (not an ADK tool)
   parsers/
     pdf_parser.py           # PDF → PIL Images via pdf2image (150 DPI)
     pptx_parser.py          # PPTX → PIL Images via LibreOffice → pdf2image
@@ -83,10 +81,9 @@ Key: `_push()` never touches `muted`. Only `_flush_and_unmute()` unmutes — pre
   - `slide_number` looks up pre-generated script from `load_presentation` state
 - `load_presentation(file_path)` — parses file, calls `generate_script` per slide (7s delay between for rate limit), stores scripts + document_text in module state
 
-### gemini_client.py
+### generate_script.py (app/tools/)
 - Uses FAU TRUSSED OpenAI-compatible proxy (`https://fauengtrussed.fau.edu/provider/generic`)
 - `generate_script(PIL_image)` → 4-6 sentence spoken script
-- `classify_slide(PIL_image)` → excited / neutral / questioning / serious
 
 ### gestures.py
 - `slide_transition`: pitch -20° (minjerk 0.5s) → neutral (ease_in_out 0.7s)
@@ -111,8 +108,8 @@ scp app/system_prompt.md                 pollen@reachy-mini.local:~/reachy-prese
 scp app/audio_helpers/__init__.py        pollen@reachy-mini.local:~/reachy-presenter/app/audio_helpers/__init__.py
 scp app/tools/present_slide.py           pollen@reachy-mini.local:~/reachy-presenter/app/tools/present_slide.py
 scp app/tools/load_presentation.py       pollen@reachy-mini.local:~/reachy-presenter/app/tools/load_presentation.py
+scp app/tools/generate_script.py        pollen@reachy-mini.local:~/reachy-presenter/app/tools/generate_script.py
 scp app/robot/gestures.py               pollen@reachy-mini.local:~/reachy-presenter/app/robot/gestures.py
-scp app/llm/gemini_client.py            pollen@reachy-mini.local:~/reachy-presenter/app/llm/gemini_client.py
 scp requirements.txt                     pollen@reachy-mini.local:~/reachy-presenter/requirements.txt
 ```
 
