@@ -39,6 +39,15 @@ def _get_generator_llm(provider: str, model: str, json_mode: bool = False):
     elif provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
         return ChatGoogleGenerativeAI(model=model, google_api_key=os.environ["GOOGLE_API_KEY"], convert_system_message_to_human=True, response_mime_type="application/json", model_kwargs={"thinking_config": {"thinking_budget": 0}})
+    elif provider == "vultr":
+        from langchain_openai import ChatOpenAI
+        kwargs = {"model_kwargs": {"response_format": {"type": "json_object"}}} if json_mode else {}
+        return ChatOpenAI(
+            model=model,
+            api_key=os.environ["VULTR_API_KEY"],
+            base_url="https://api.vultrinference.com/v1",
+            **kwargs,
+        )
     raise ValueError(f"Unknown model provider: {provider}")
 
 
@@ -323,7 +332,7 @@ if __name__ == "__main__":
     parser.add_argument("--testset-size", type=int, default=20, dest="testset_size")
     parser.add_argument("--testset", default=None)
     parser.add_argument("--save-testset", default=None, dest="save_testset")
-    parser.add_argument("--model-provider", choices=["ollama", "openai", "gemini"], default="ollama", dest="model_provider")
+    parser.add_argument("--model-provider", choices=["ollama", "openai", "gemini", "vultr"], default="ollama", dest="model_provider")
     parser.add_argument("--model", default="mistral", dest="model")
     parser.add_argument("--parser", default="pdfplumber")
     parser.add_argument("--chunk-size", type=int, default=400, dest="chunk_size")

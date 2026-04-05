@@ -35,6 +35,13 @@ def _get_llm(provider: str, model: str):
     elif provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
         return ChatGoogleGenerativeAI(model=model)
+    elif provider == "vultr":
+        from langchain_openai import ChatOpenAI
+        return ChatOpenAI(
+            model=model,
+            api_key=os.environ["VULTR_API_KEY"],
+            base_url="https://api.vultrinference.com/v1",
+        )
     raise ValueError(f"Unknown provider: {provider}")
 
 
@@ -75,7 +82,7 @@ if __name__ == "__main__":
     parser.add_argument("--reranker", choices=["cross-encoder", "cohere"], default="cross-encoder")
     parser.add_argument("--top-n", type=int, default=5, dest="top_n")
     parser.add_argument("--retriever-k", type=int, default=20, dest="retriever_k")
-    parser.add_argument("--gen-provider", choices=["openai", "ollama", "gemini"], default="openai", dest="gen_provider")
+    parser.add_argument("--gen-provider", choices=["openai", "ollama", "gemini", "vultr"], default="openai", dest="gen_provider")
     parser.add_argument("--model", default="gpt-4o-mini")
     parser.add_argument("--stream", action="store_true")
     args = parser.parse_args()

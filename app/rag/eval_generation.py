@@ -109,9 +109,10 @@ def eval_generation(
         for item, retrieved_docs, answer in results
     ]
 
-    _JUDGE_EMBED_MODELS = {"openai": "text-embedding-3-small", "ollama": "nomic-embed-text", "gemini": "models/text-embedding-004"}
+    _JUDGE_EMBED_MODELS = {"openai": "text-embedding-3-small", "ollama": "nomic-embed-text", "gemini": "models/text-embedding-004", "vultr": "nomic-embed-text"}
+    _JUDGE_EMBED_PROVIDERS = {"openai": "openai", "ollama": "ollama", "gemini": "gemini", "vultr": "ollama"}
     judge_llm = LangchainLLMWrapper(_get_generator_llm(judge_provider, judge_model))
-    judge_emb = LangchainEmbeddingsWrapper(get_embeddings(judge_provider, _JUDGE_EMBED_MODELS[judge_provider]))
+    judge_emb = LangchainEmbeddingsWrapper(get_embeddings(_JUDGE_EMBED_PROVIDERS[judge_provider], _JUDGE_EMBED_MODELS[judge_provider]))
 
     metrics = [
         Faithfulness(llm=judge_llm),
@@ -164,12 +165,12 @@ if __name__ == "__main__":
     parser.add_argument("--reranker", choices=["cross-encoder", "cohere"], default="cross-encoder")
     parser.add_argument("--top-n", type=int, default=5, dest="top_n")
     parser.add_argument("--retriever-k", type=int, default=20, dest="retriever_k")
-    parser.add_argument("--gen-provider", choices=["openai", "ollama", "gemini"], default="openai", dest="gen_provider")
+    parser.add_argument("--gen-provider", choices=["openai", "ollama", "gemini", "vultr"], default="openai", dest="gen_provider")
     parser.add_argument("--gen-model", default="gpt-4o-mini", dest="gen_model")
     parser.add_argument("--testset-size", type=int, default=20, dest="testset_size")
     parser.add_argument("--testset", default=None)
     parser.add_argument("--save-testset", default=None, dest="save_testset")
-    parser.add_argument("--judge-provider", choices=["ollama", "openai", "gemini"], default="openai", dest="judge_provider")
+    parser.add_argument("--judge-provider", choices=["ollama", "openai", "gemini", "vultr"], default="openai", dest="judge_provider")
     parser.add_argument("--judge-model", default="gpt-4o-mini", dest="judge_model")
     parser.add_argument("--parser", default="pdfplumber")
     parser.add_argument("--chunk-size", type=int, default=400, dest="chunk_size")
