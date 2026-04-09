@@ -7,7 +7,7 @@ from langchain_core.documents import Document
 from langchain_ollama import OllamaEmbeddings
 from langchain_openai import OpenAIEmbeddings
 from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
-from langchain_text_splitters import TokenTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 from app.parsers.parsers import parse
@@ -22,9 +22,12 @@ def get_embeddings(provider: str, model: str):
         return OpenAIEmbeddings(model=model)
     elif provider == "ollama":
         return OllamaEmbeddings(model=model)
+    elif provider == "gemini":
+        from langchain_google_genai import GoogleGenerativeAIEmbeddings
+        return GoogleGenerativeAIEmbeddings(model=model, google_api_key=os.environ["GOOGLE_API_KEY"])
     raise ValueError(f"Unknown provider: {provider}")
 
-def ingest(file_path: str, provider: str = "ollama", model: str = "nomic-embed-text", collection: str = "reachy_collection", parser: str = "docling", sparse_model: str = "Qdrant/bm25", chunk_size: int = 400, chunk_overlap: int = 60) -> int:
+def ingest(file_path: str, provider: str = "ollama", model: str = "nomic-embed-text", collection: str = "reachy_collection", parser: str = "pdfplumber", sparse_model: str = "Qdrant/bm25", chunk_size: int = 700, chunk_overlap: int = 100) -> int:
     file_path = os.path.abspath(file_path)
     with open(file_path, "rb") as f:
         doc_id = hashlib.sha256(f.read()).hexdigest()
@@ -48,8 +51,8 @@ def ingest(file_path: str, provider: str = "ollama", model: str = "nomic-embed-t
         if text.strip()
     ]
 
-    # 3. Split into chunks (TokenTextSplitter uses tiktoken under the hood)
-    splitter = TokenTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    # 3. Split into chunks (token-aware recursive splitting respects paragraph/sentence boundaries)
+    splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     chunks = splitter.split_documents(docs)
 
     # 4. Delete existing chunks for this document (idempotency)
@@ -85,8 +88,8 @@ if __name__ == "__main__":
     parser.add_argument("--collection", default="reachy_collection")
     parser.add_argument("--parser", default="docling")
     parser.add_argument("--sparse-model", default="Qdrant/bm25", dest="sparse_model")
-    parser.add_argument("--chunk-size", type=int, default=400, dest="chunk_size")
-    parser.add_argument("--chunk-overlap", type=int, default=60, dest="chunk_overlap")
+    parser.add_argument("--chunk-size", type=int, default=700, dest="chunk_size")
+    parser.add_argument("--chunk-overlap", type=int, default=100, dest="chunk_overlap")
     parser.add_argument("--eval", type=int, choices=[0, 1], default=0,
                         help="1 = run retrieval eval after ingestion")
     args = parser.parse_args()

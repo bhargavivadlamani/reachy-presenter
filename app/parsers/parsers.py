@@ -8,13 +8,14 @@ def parse(file_path: str, parser: str = "pdfplumber") -> list[str]:
     raise ValueError(f"Unknown parser: {parser}")
 
 def _parse_docling(path: str) -> list[str]:
-    from docling.document_converter import DocumentConverter
+    from docling.document_converter import DocumentConverter, PdfFormatOption
+    from docling.datamodel.base_models import InputFormat
     from docling.chunking import HybridChunker
     from docling.datamodel.pipeline_options import PdfPipelineOptions
 
-    pipeline_options = PdfPipelineOptions(do_ocr=False)
+    pipeline_options = PdfPipelineOptions(do_ocr=False, do_table_structure=False)
     converter = DocumentConverter(
-        format_options={"pdf": {"pipeline_options": pipeline_options}}
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
     )
     result = converter.convert(path)
 

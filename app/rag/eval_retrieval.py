@@ -10,7 +10,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
 from qdrant_client import QdrantClient
-from langchain_text_splitters import TokenTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from ragas.testset.synthesizers.single_hop.specific import SingleHopSpecificQuerySynthesizer
 from ragas.testset.synthesizers.multi_hop.specific import MultiHopSpecificQuerySynthesizer
 from app.rag.ingest import QDRANT_URL, get_embeddings
@@ -46,6 +46,7 @@ def _get_generator_llm(provider: str, model: str, json_mode: bool = False):
             model=model,
             api_key=os.environ["VULTR_API_KEY"],
             base_url="https://api.vultrinference.com/v1",
+            max_tokens=4096,
             **kwargs,
         )
     raise ValueError(f"Unknown model provider: {provider}")
@@ -222,8 +223,8 @@ def eval_retrieval(
     model: str = "mistral",
     retriever_k: int = 20,
     parser: str = "docling",
-    chunk_size: int = 400,
-    chunk_overlap: int = 60,
+    chunk_size: int = 700,
+    chunk_overlap: int = 100,
 ):
     file_path = os.path.abspath(file_path)
 
@@ -231,7 +232,7 @@ def eval_retrieval(
     raw_pages = parse(file_path, parser=parser)
     docs = [Document(page_content=text, metadata={"source": file_path, "page": i})
             for i, text in enumerate(raw_pages) if text.strip()]
-    splitter = TokenTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     chunks = splitter.split_documents(docs)
 
     embeddings = get_embeddings(embedding_provider, embedding_model)
@@ -335,8 +336,8 @@ if __name__ == "__main__":
     parser.add_argument("--model-provider", choices=["ollama", "openai", "gemini", "vultr"], default="ollama", dest="model_provider")
     parser.add_argument("--model", default="mistral", dest="model")
     parser.add_argument("--parser", default="pdfplumber")
-    parser.add_argument("--chunk-size", type=int, default=400, dest="chunk_size")
-    parser.add_argument("--chunk-overlap", type=int, default=60, dest="chunk_overlap")
+    parser.add_argument("--chunk-size", type=int, default=700, dest="chunk_size")
+    parser.add_argument("--chunk-overlap", type=int, default=100, dest="chunk_overlap")
     args = parser.parse_args()
 
     eval_retrieval(

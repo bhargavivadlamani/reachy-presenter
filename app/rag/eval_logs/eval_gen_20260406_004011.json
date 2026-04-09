@@ -1,0 +1,16 @@
+{
+  "timestamp": "2026-04-06T00:40:11.869215+00:00",
+  "file": "C:\\Users\\likhi\\Documents\\reachy-presenter\\app\\ReachyMini1.pdf",
+  "collection": "eval-gen-collection",
+  "gen_provider": "vultr",
+  "gen_model": "MiniMaxAI/MiniMax-M2.5",
+  "n_questions": 100,
+  "metrics_computed": [
+    "faithfulness",
+    "answer_relevancy",
+    "answer_correctness"
+  ],
+  "faithfulness": NaN,
+  "answer_relevancy": NaN,
+  "answer_correctness": NaN
+}

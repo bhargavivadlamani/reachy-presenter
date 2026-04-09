@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from langchain_core.documents import Document
-from langchain_text_splitters import TokenTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.rate_limiters import InMemoryRateLimiter
 from app.rag.eval_retrieval import _get_generator_llm, _load_or_generate_testset, _log_run, _generate_testset
 from app.rag.retrieve import retrieve
@@ -34,10 +34,10 @@ def eval_generation(
     judge_provider: str = "openai",
     judge_model: str = "gpt-4o-mini",
     parser: str = "pdfplumber",
-    chunk_size: int = 400,
-    chunk_overlap: int = 60,
+    chunk_size: int = 700,
+    chunk_overlap: int = 100,
 ):
-    from ragas import EvaluationDataset, SingleTurnSample, evaluate
+    from ragas import EvaluationDataset, SingleTurnSample, evaluate, RunConfig
     from ragas.metrics import Faithfulness, AnswerRelevancy, AnswerCorrectness
     from ragas.llms import LangchainLLMWrapper
     from ragas.embeddings import LangchainEmbeddingsWrapper
@@ -48,7 +48,7 @@ def eval_generation(
     raw_pages = parse(file_path, parser=parser)
     docs = [Document(page_content=text, metadata={"source": file_path, "page": i})
             for i, text in enumerate(raw_pages) if text.strip()]
-    splitter = TokenTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     chunks = splitter.split_documents(docs)
 
     embeddings = get_embeddings(provider, embedding_model)
@@ -122,7 +122,9 @@ def eval_generation(
         metrics.append(AnswerCorrectness(llm=judge_llm, embeddings=judge_emb))
 
     # 6. Score
-    scores = evaluate(EvaluationDataset(samples=samples), metrics=metrics)
+    _RATE_LIMITED_PROVIDERS = {"gemini"}
+    run_cfg = RunConfig(max_workers=1, timeout=180) if judge_provider in _RATE_LIMITED_PROVIDERS else RunConfig()
+    scores = evaluate(EvaluationDataset(samples=samples), metrics=metrics, run_config=run_cfg)
     scores_dict = scores.to_pandas().mean(numeric_only=True).to_dict()
 
     # 7. Print report
@@ -173,8 +175,8 @@ if __name__ == "__main__":
     parser.add_argument("--judge-provider", choices=["ollama", "openai", "gemini", "vultr"], default="openai", dest="judge_provider")
     parser.add_argument("--judge-model", default="gpt-4o-mini", dest="judge_model")
     parser.add_argument("--parser", default="pdfplumber")
-    parser.add_argument("--chunk-size", type=int, default=400, dest="chunk_size")
-    parser.add_argument("--chunk-overlap", type=int, default=60, dest="chunk_overlap")
+    parser.add_argument("--chunk-size", type=int, default=700, dest="chunk_size")
+    parser.add_argument("--chunk-overlap", type=int, default=100, dest="chunk_overlap")
     args = parser.parse_args()
 
     eval_generation(
