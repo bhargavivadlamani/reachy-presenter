@@ -7,7 +7,7 @@ Reachy Mini robot presenter powered by Google ADK and Gemini Bidi streaming.
 - Runs as a persistent conversational agent — always listening, never locked into a fixed workflow
 - User can say "load my deck" → agent parses PDF/PPTX and generates scripts via vision LLM
 - User can say "present slide 2" → agent calls `present_slide`, performs robot gesture, reads script aloud
-- Handles free-form Q&A and conversation between slides
+- Handles free-form Q&A and conversation between slides; calls `rag_query` to ground answers in ingested documents
 - Native bidi audio: no separate TTS/STT, built-in interruption handling
 
 ## Running
@@ -58,8 +58,11 @@ app/
 
 `.env` file needs:
 ```
-GEMINI_API_KEY=...     # Gemini Bidi streaming (agent audio)
-OPENAI_API_KEY=...     # FAU TRUSSED proxy — GPT-4o vision for script generation
+GEMINI_API_KEY=...           # Gemini Bidi streaming (agent audio)
+OPENAI_API_KEY=...           # FAU TRUSSED proxy — GPT-4o vision for script generation
+QDRANT_URL=...               # Qdrant instance for RAG (e.g. http://localhost:6333)
+RAG_EMBED_PROVIDER=ollama    # embedding provider used at ingest time
+RAG_EMBED_MODEL=nomic-embed-text
 ```
 
 Robot: `reachy-mini.local`, user `pollen`, project path `~/reachy-presenter/`
@@ -99,10 +102,28 @@ Interruption flow:
 
 ## Agent tools
 
-| Tool | Registered | Description |
-|------|-----------|-------------|
-| `present_slide(slide_number, script, document_text)` | yes | Robot gesture + signal agent to read script aloud |
-| `load_presentation(file_path)` | yes | Parse PDF/PPTX, generate all scripts, store for slide_number lookup |
+| Tool | Description |
+|------|-------------|
+| `load_presentation(file_path)` | Parse PDF/PPTX, generate all scripts, store for slide_number lookup |
+| `present_slide(slide_number, script, document_text)` | Robot gesture + signal agent to read script aloud |
+| `rag_query(query, collection_name)` | Retrieve relevant chunks from Qdrant; agent synthesizes the answer |
+
+### Agentic RAG
+
+`rag_query` enables the agent to answer student questions grounded in ingested documents (slides, textbooks, papers). It runs hybrid search (dense + sparse BM25) with cross-encoder reranking and returns formatted chunks with source citations. The main Gemini agent synthesizes the final answer.
+
+**Setup:** pre-ingest documents before starting the agent:
+```
+python -m app.rag.ingest lecture.pdf --collection lecture
+```
+Collection name convention: lowercase filename stem. When `load_presentation("lecture.pdf")` is called, `rag_query` automatically targets the `lecture` collection — no extra config needed.
+
+**Environment variables** (add to `.env`):
+```
+QDRANT_URL=http://localhost:6333
+RAG_EMBED_PROVIDER=ollama          # must match what was used at ingest time
+RAG_EMBED_MODEL=nomic-embed-text   # must match ingest embedding model
+```
 
 ## Installing on robot
 

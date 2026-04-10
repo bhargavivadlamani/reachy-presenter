@@ -14,6 +14,7 @@ _scripts: list[str] = []
 _document_text: str = ""
 _total_slides: int = 0
 _generating: bool = False
+_collection_name: str = ""
 _lock = threading.Lock()
 
 
@@ -27,6 +28,11 @@ def get_slide_script(slide_number: int) -> Optional[str]:
 def get_document_text() -> str:
     with _lock:
         return _document_text
+
+
+def get_collection_name() -> str:
+    with _lock:
+        return _collection_name
 
 
 def get_slide_count() -> int:
@@ -77,7 +83,7 @@ def load_presentation(file_path: str) -> str:
     Returns:
         Confirmation that background generation has started.
     """
-    global _scripts, _document_text, _total_slides, _generating
+    global _scripts, _document_text, _total_slides, _generating, _collection_name
 
     ext = os.path.splitext(file_path)[1].lower()
     if ext == ".pdf":
@@ -96,6 +102,7 @@ def load_presentation(file_path: str) -> str:
         _scripts = []
         _document_text = ""
         _total_slides = len(images)
+        _collection_name = os.path.splitext(os.path.basename(file_path))[0].lower()
     _generating = True
 
     threading.Thread(

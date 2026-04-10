@@ -32,6 +32,7 @@ from scipy.signal import resample as scipy_resample  # used in run_for_robot res
 from app.audio_helpers import MIC_SR, GEM_SR, VAD_THRESHOLD, to_pcm_bytes, decode_pcm
 from app.tools.present_slide import present_slide, set_mini
 from app.tools.load_presentation import load_presentation
+from app.tools.rag_query import rag_query
 
 load_dotenv()
 
@@ -63,7 +64,7 @@ _agent = Agent(
     name="reachy_presenter",
     model=_MODEL,
     instruction=_SYSTEM_PROMPT,
-    tools=[present_slide, load_presentation],
+    tools=[present_slide, load_presentation, rag_query],
 )
 
 _session_service = InMemorySessionService()
