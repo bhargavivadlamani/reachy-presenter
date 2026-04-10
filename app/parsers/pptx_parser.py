@@ -27,14 +27,31 @@ def extract_slides(pptx_path: str) -> list[str]:
 def extract_slide_images(pptx_path: str) -> list:
     """Return a list of PIL Images, one per slide.
 
-    Converts PPTX → PDF via LibreOffice (must be installed), then renders pages.
-    On robot: sudo apt-get install libreoffice poppler-utils
+    Tries LibreOffice first. If not installed, falls back to rendering each slide
+    as a plain white image with the extracted text drawn on it.
     """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        subprocess.run(
-            ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir", tmpdir, pptx_path],
-            check=True,
-            capture_output=True,
-        )
-        pdf_path = Path(tmpdir) / (Path(pptx_path).stem + ".pdf")
-        return convert_from_path(str(pdf_path), dpi=150)
+    libreoffice = subprocess.run(["which", "libreoffice"], capture_output=True).returncode == 0
+    if libreoffice:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            subprocess.run(
+                ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir", tmpdir, pptx_path],
+                check=True,
+                capture_output=True,
+            )
+            pdf_path = Path(tmpdir) / (Path(pptx_path).stem + ".pdf")
+            return convert_from_path(str(pdf_path), dpi=150)
+
+    # Fallback: render text-only images using Pillow
+    from PIL import Image, ImageDraw, ImageFont
+    slide_texts = extract_slides(pptx_path)
+    images = []
+    for text in slide_texts:
+        img = Image.new("RGB", (1280, 720), color=(255, 255, 255))
+        draw = ImageDraw.Draw(img)
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 28)
+        except Exception:
+            font = ImageFont.load_default()
+        draw.multiline_text((60, 60), text, fill=(20, 40, 80), font=font, spacing=10)
+        images.append(img)
+    return images

@@ -48,7 +48,7 @@ _MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
 _APP_NAME = "reachy-presenter"
 _USER_ID = "presenter"
 _SESSION_ID = "main"
-_PRESENTATION_PATH = Path("/home/pollen/ReachyMini1.pdf")
+_PRESENTATION_PATH = Path("/home/pollen/reachy-presenter/ReachyMini2.pptx")
 
 _SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.md").read_text().strip()
 if _PRESENTATION_PATH.exists():

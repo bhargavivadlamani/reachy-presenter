@@ -44,3 +44,24 @@ def generate_script(slide_image) -> str:
         max_tokens=300,
     )
     return response.choices[0].message.content.strip()
+
+
+def generate_script_from_text(slide_text: str) -> str:
+    """Generate a spoken presentation script from slide text (no image needed)."""
+    response = _client.chat.completions.create(
+        model=_MODEL,
+        messages=[{
+            "role": "user",
+            "content": (
+                "You are writing a script for a live presentation. "
+                "The following is the text content of a slide. "
+                "Write a natural, conversational spoken script as if a confident human presenter "
+                "is delivering it live to an audience. Use first-person language and speak directly "
+                "to the audience. Vary your sentence rhythm. Never use placeholder text or stage directions. "
+                "Write exactly what should be spoken, nothing else. Keep it to 4-6 sentences.\n\n"
+                f"Slide content:\n{slide_text}"
+            ),
+        }],
+        max_tokens=300,
+    )
+    return response.choices[0].message.content.strip()
