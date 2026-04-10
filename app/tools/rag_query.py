@@ -8,26 +8,32 @@ _RAG_EMBED_MODEL = os.getenv("RAG_EMBED_MODEL", "models/text-embedding-004")
 _RAG_RERANKER = os.getenv("RAG_RERANKER", "cohere")
 
 
-def rag_query(query: str, collection_name: str = "") -> str:
-    """Retrieve relevant document chunks from the knowledge base to help answer a question.
+_DEFAULT_COLLECTION = "testcollection2"
 
-    Call this whenever a student asks something that needs factual grounding —
-    questions about slide content, deeper topic explanations, or anything from
-    ingested reference documents (textbooks, papers, notes). The returned
-    context contains numbered source citations; use them in your answer.
+
+def rag_query(query: str, collection_name: str = "") -> str:
+    """Search the Reachy Mini knowledge base to answer factual questions.
+
+    The knowledge base contains official Reachy Mini documentation — hardware specs,
+    SDK usage, sensors, motors, antennas, audio, camera, head tracking, and setup guides.
+    Also contains any ingested presentation content.
+
+    Call this whenever someone asks about:
+    - Reachy Mini hardware, capabilities, or specifications
+    - How to use the SDK or control the robot
+    - Questions related to any loaded presentation content
+    - Any factual topic that might be covered in the ingested documents
 
     Args:
-        query: The student's question in natural language.
-        collection_name: Qdrant collection to search. Leave empty to use the
-            currently loaded presentation's collection automatically. Pass an
-            explicit name to search a different ingested document.
+        query: The question in natural language.
+        collection_name: Qdrant collection to search. Leave empty to auto-select:
+            uses the loaded presentation's collection if available, otherwise
+            falls back to the default Reachy Mini knowledge base.
 
     Returns:
         Formatted context chunks with source citations, or an error message.
     """
-    collection = collection_name or get_collection_name()
-    if not collection:
-        return "No collection available. Load a presentation first or specify a collection_name."
+    collection = collection_name or get_collection_name() or _DEFAULT_COLLECTION
 
     print(f"[rag_query] collection={collection!r} query={query!r}")
     try:
