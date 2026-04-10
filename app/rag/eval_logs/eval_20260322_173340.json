@@ -1,0 +1,36 @@
+{
+  "timestamp": "2026-03-22T17:33:40.130401+00:00",
+  "file": "C:\\Users\\likhi\\OneDrive\\Desktop\\Reading Materials\\Multi-Agent Systems.pdf",
+  "collection": "offline-evals-dataset2",
+  "embedding_provider": "ollama",
+  "embedding_model": "nomic-embed-text",
+  "reranker": "cross-encoder",
+  "top_n": 5,
+  "retriever_k": 20,
+  "n_questions": 102,
+  "stage1": {
+    "recall": 0.7238562091503269,
+    "precision": 0.05833333333333333,
+    "hit": 0.8627450980392157,
+    "mrr": 0.6868775287892933,
+    "ndcg": 0.6980917665224772
+  },
+  "stage2": {
+    "recall": 0.5866013071895424,
+    "precision": 0.1705882352941176,
+    "hit": 0.7647058823529411,
+    "mrr": 0.6687908496732027,
+    "ndcg": 0.691657378051186
+  },
+  "delta": {
+    "recall": -0.022875816993464193,
+    "precision": -0.01372549019607841,
+    "hit": -0.02941176470588236,
+    "mrr": -0.009967320261437762,
+    "ndcg": -0.010685640768898996
+  },
+  "diversity": {
+    "stage1": 0.4125645954737322,
+    "stage2": 0.4411176232595368
+  }
+}

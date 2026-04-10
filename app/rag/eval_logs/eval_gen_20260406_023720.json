@@ -1,0 +1,16 @@
+{
+  "timestamp": "2026-04-06T02:37:20.124965+00:00",
+  "file": "C:\\Users\\likhi\\OneDrive\\Desktop\\Reading Materials\\Multi-Agent Systems.pdf",
+  "collection": "multi-agent-2",
+  "gen_provider": "vultr",
+  "gen_model": "MiniMaxAI/MiniMax-M2.5",
+  "n_questions": 100,
+  "metrics_computed": [
+    "faithfulness",
+    "answer_relevancy",
+    "answer_correctness"
+  ],
+  "faithfulness": NaN,
+  "answer_relevancy": NaN,
+  "answer_correctness": NaN
+}
