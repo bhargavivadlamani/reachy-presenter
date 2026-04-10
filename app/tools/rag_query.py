@@ -28,6 +28,7 @@ def rag_query(query: str, collection_name: str = "") -> str:
     if not collection:
         return "No collection available. Load a presentation first or specify a collection_name."
 
+    print(f"[rag_query] collection={collection!r} query={query!r}")
     try:
         docs = retrieve(
             query=query,
@@ -36,7 +37,10 @@ def rag_query(query: str, collection_name: str = "") -> str:
             model=_RAG_EMBED_MODEL,
         )
         if not docs:
+            print("[rag_query] No results returned.")
             return "No relevant content found for that query."
+        print(f"[rag_query] Returning {len(docs)} chunks.")
         return build_context(docs)
     except Exception as e:
+        print(f"[rag_query] Error: {e}")
         return f"Retrieval failed: {e}"
