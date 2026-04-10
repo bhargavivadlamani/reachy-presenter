@@ -3,8 +3,9 @@ import os
 from app.tools.load_presentation import get_collection_name
 from app.rag.retrieve import retrieve, build_context
 
-_RAG_EMBED_PROVIDER = os.getenv("RAG_EMBED_PROVIDER", "ollama")
-_RAG_EMBED_MODEL = os.getenv("RAG_EMBED_MODEL", "nomic-embed-text")
+_RAG_EMBED_PROVIDER = os.getenv("RAG_EMBED_PROVIDER", "gemini")
+_RAG_EMBED_MODEL = os.getenv("RAG_EMBED_MODEL", "models/text-embedding-004")
+_RAG_RERANKER = os.getenv("RAG_RERANKER", "cohere")
 
 
 def rag_query(query: str, collection_name: str = "") -> str:
@@ -35,6 +36,7 @@ def rag_query(query: str, collection_name: str = "") -> str:
             collection=collection,
             provider=_RAG_EMBED_PROVIDER,
             model=_RAG_EMBED_MODEL,
+            reranker=_RAG_RERANKER,
         )
         if not docs:
             print("[rag_query] No results returned.")

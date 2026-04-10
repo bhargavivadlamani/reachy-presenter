@@ -58,11 +58,11 @@ app/
 
 `.env` file needs:
 ```
-GEMINI_API_KEY=...           # Gemini Bidi streaming (agent audio)
-OPENAI_API_KEY=...           # FAU TRUSSED proxy — GPT-4o vision for script generation
-QDRANT_URL=...               # Qdrant instance for RAG (e.g. http://localhost:6333)
-RAG_EMBED_PROVIDER=ollama    # embedding provider used at ingest time
-RAG_EMBED_MODEL=nomic-embed-text
+GEMINI_API_KEY=...        # Gemini Bidi streaming (agent audio) + RAG embeddings
+OPENAI_API_KEY=...        # FAU TRUSSED proxy — GPT-4o vision for script generation
+QDRANT_URL=...            # Qdrant Cloud endpoint
+QDRANT_API_KEY=...        # Qdrant Cloud API key
+COHERE_API_KEY=...        # Cohere reranker for RAG
 ```
 
 Robot: `reachy-mini.local`, user `pollen`, project path `~/reachy-presenter/`
@@ -110,7 +110,9 @@ Interruption flow:
 
 ### Agentic RAG
 
-`rag_query` enables the agent to answer student questions grounded in ingested documents (slides, textbooks, papers). It runs hybrid search (dense + sparse BM25) with cross-encoder reranking and returns formatted chunks with source citations. The main Gemini agent synthesizes the final answer.
+`rag_query` enables the agent to answer student questions grounded in ingested documents (slides, textbooks, papers). It runs hybrid search (dense + sparse BM25) with Cohere reranking and returns formatted chunks with source citations. The main Gemini agent synthesizes the final answer.
+
+The RAG stack runs fully in the cloud — Gemini embeddings, Cohere reranker, and Qdrant Cloud — so the Pi only runs the ADK agent and audio I/O. FastEmbedSparse (BM25 sparse vectors) is the only local component, as it is CPU-only and lightweight.
 
 **Setup:** pre-ingest documents before starting the agent:
 ```
@@ -120,9 +122,15 @@ Collection name convention: lowercase filename stem. When `load_presentation("le
 
 **Environment variables** (add to `.env`):
 ```
-QDRANT_URL=http://localhost:6333
-RAG_EMBED_PROVIDER=ollama          # must match what was used at ingest time
-RAG_EMBED_MODEL=nomic-embed-text   # must match ingest embedding model
+QDRANT_URL=https://<your-cluster>.qdrant.io   # Qdrant Cloud endpoint
+QDRANT_API_KEY=...                             # Qdrant Cloud API key
+COHERE_API_KEY=...                             # Cohere reranker
+# GEMINI_API_KEY already present — reused for embeddings (models/text-embedding-004)
+
+# Optional overrides (defaults shown):
+RAG_EMBED_PROVIDER=gemini
+RAG_EMBED_MODEL=models/text-embedding-004
+RAG_RERANKER=cohere
 ```
 
 ## Installing on robot
