@@ -45,7 +45,7 @@ def _get_llm(provider: str, model: str):
     raise ValueError(f"Unknown provider: {provider}")
 
 
-@traceable(name="rag_generate")
+# @traceable(name="rag_generate")
 def generate(query: str, docs, provider: str = "openai", model: str = "gpt-4o-mini", stream: bool = False):
     context = build_context(docs)
     chain = _PROMPT | _get_llm(provider, model) | StrOutputParser()
@@ -54,7 +54,7 @@ def generate(query: str, docs, provider: str = "openai", model: str = "gpt-4o-mi
     return chain.invoke({"context": context, "query": query})
 
 
-@traceable(name="rag_retrieve_generate")
+# @traceable(name="rag_retrieve_generate")
 def retrieve_generate(
     query: str,
     collection: str = "reachy_collection",

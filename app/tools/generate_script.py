@@ -8,8 +8,8 @@ from openai import OpenAI
 load_dotenv()
 
 _client = OpenAI(
-    api_key=os.environ.get("OPENAI_API_KEY"),
-    base_url="https://fauengtrussed.fau.edu/provider/generic",
+    api_key=os.environ.get("OPENAI_API_KEY")
+    # base_url="https://fauengtrussed.fau.edu/provider/generic",
 )
 _MODEL = "gpt-4o"
 

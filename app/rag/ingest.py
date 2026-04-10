@@ -15,6 +15,7 @@ from app.parsers.parsers import parse
 load_dotenv()
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 
 
 def get_embeddings(provider: str, model: str):
@@ -24,10 +25,13 @@ def get_embeddings(provider: str, model: str):
         return OllamaEmbeddings(model=model)
     elif provider == "gemini":
         from langchain_google_genai import GoogleGenerativeAIEmbeddings
-        return GoogleGenerativeAIEmbeddings(model=model, google_api_key=os.environ["GOOGLE_API_KEY"])
+        return GoogleGenerativeAIEmbeddings(
+            model=model,
+            google_api_key=os.environ.get("GOOGLE_API_KEY") or os.environ["GEMINI_API_KEY"],
+        )
     raise ValueError(f"Unknown provider: {provider}")
 
-def ingest(file_path: str, provider: str = "ollama", model: str = "nomic-embed-text", collection: str = "reachy_collection", parser: str = "pdfplumber", sparse_model: str = "Qdrant/bm25", chunk_size: int = 700, chunk_overlap: int = 100) -> int:
+def ingest(file_path: str, provider: str = "gemini", model: str = "models/text-embedding-004", collection: str = "reachy_collection", parser: str = "pdfplumber", sparse_model: str = "Qdrant/bm25", chunk_size: int = 700, chunk_overlap: int = 100) -> int:
     file_path = os.path.abspath(file_path)
     with open(file_path, "rb") as f:
         doc_id = hashlib.sha256(f.read()).hexdigest()
@@ -56,7 +60,7 @@ def ingest(file_path: str, provider: str = "ollama", model: str = "nomic-embed-t
     chunks = splitter.split_documents(docs)
 
     # 4. Delete existing chunks for this document (idempotency)
-    qdrant = QdrantClient(url=QDRANT_URL)
+    qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
     try:
         qdrant.delete(
             collection_name=collection,
@@ -74,7 +78,9 @@ def ingest(file_path: str, provider: str = "ollama", model: str = "nomic-embed-t
         chunks, embeddings,
         sparse_embedding=sparse,
         retrieval_mode=RetrievalMode.HYBRID,
-        url=QDRANT_URL, collection_name=collection,
+        url=QDRANT_URL,
+        api_key=QDRANT_API_KEY,
+        collection_name=collection,
     )
 
     return len(chunks)
@@ -83,7 +89,7 @@ def ingest(file_path: str, provider: str = "ollama", model: str = "nomic-embed-t
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("file")
-    parser.add_argument("--provider", choices=["openai", "ollama"], default="ollama")
+    parser.add_argument("--provider", choices=["openai", "ollama", "gemini"], default="gemini")
     parser.add_argument("--model", default="nomic-embed-text")
     parser.add_argument("--collection", default="reachy_collection")
     parser.add_argument("--parser", default="docling")

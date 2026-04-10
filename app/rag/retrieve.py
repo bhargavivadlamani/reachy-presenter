@@ -6,13 +6,9 @@ load_dotenv()
 
 from langchain_core.documents import Document
 from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
-from langsmith import traceable
+# from langsmith import traceable
 from qdrant_client import QdrantClient
-from sentence_transformers import CrossEncoder
-from app.rag.ingest import QDRANT_URL, get_embeddings
-
-CROSS_ENCODER_MODEL = os.getenv("CROSS_ENCODER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
-_cross_encoder = CrossEncoder(CROSS_ENCODER_MODEL)
+from app.rag.ingest import QDRANT_URL, QDRANT_API_KEY, get_embeddings
 
 
 def rerank(query: str, chunks: list[Document], reranker: str = "cross-encoder", top_k: int = 5) -> list[Document]:
@@ -22,13 +18,15 @@ def rerank(query: str, chunks: list[Document], reranker: str = "cross-encoder", 
         return _rerank_cohere(query, chunks, top_k)
     raise ValueError(f"Unknown reranker: {reranker}")
 
-@traceable(name="rerank using cross encoder")
+# @traceable(name="rerank using cross encoder")
 def _rerank_cross_encoder(query: str, chunks: list[Document], top_k: int) -> list[Document]:
-    scores = _cross_encoder.predict([(query, c.page_content) for c in chunks])
+    from sentence_transformers import CrossEncoder
+    model = os.getenv("CROSS_ENCODER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+    scores = CrossEncoder(model).predict([(query, c.page_content) for c in chunks])
     ranked = sorted(zip(scores, chunks), key=lambda x: x[0], reverse=True)
     return [c for _, c in ranked[:top_k]]
 
-@traceable(name="rerank using cohere")
+# @traceable(name="rerank using cohere")
 def _rerank_cohere(query: str, chunks: list[Document], top_k: int) -> list[Document]:
     import cohere  # optional dep — install separately if using this reranker
     co = cohere.Client(os.environ["COHERE_API_KEY"])
@@ -50,14 +48,14 @@ def build_context(chunks: list[Document]) -> str:
     return "\n\n".join(parts)
 
 
-@traceable(name="retrieval_run")
+# @traceable(name="retrieval_run")
 def retrieve(
     query: str,
     collection: str = "reachy_collection",
     provider: str = "ollama",
     model: str = "nomic-embed-text",
     sparse_model: str = "Qdrant/bm25",
-    reranker: str = "cross-encoder",
+    reranker: str = "cohere",
     top_n: int = 3,
     retriever_k: int = 20,
 ) -> list[Document]:
@@ -81,7 +79,7 @@ def retrieve(
     """
     embeddings = get_embeddings(provider, model)
     sparse = FastEmbedSparse(model_name=sparse_model)
-    client = QdrantClient(url=QDRANT_URL)
+    client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 
     store = QdrantVectorStore(
         client=client,
@@ -91,7 +89,7 @@ def retrieve(
         retrieval_mode=RetrievalMode.HYBRID,
     )
 
-    @traceable(name="hybrid_search")
+    # @traceable(name="hybrid_search")
     def hybrid_search(q: str) -> list[Document]:
         return store.similarity_search(q, k=retriever_k)
 
