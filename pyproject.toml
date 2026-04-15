@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "reachy-presenter"
+version = "0.1.0"
+description = "AI-powered presentation agent for Reachy Mini using Gemini Bidi streaming"
+requires-python = ">=3.10"
+dependencies = [
+    "google-adk==1.19.0",
+    "google-genai==1.68.0",
+    "openai",
+    "python-dotenv",
+    "pdfplumber",
+    "pdf2image",
+    "Pillow",
+    "python-pptx",
+    "numpy",
+    "scipy",
+    "qdrant-client",
+    "langchain-core",
+    "langchain-qdrant",
+    "fastembed",
+    "cohere",
+    "tiktoken",
+]
+
+[project.scripts]
+reachy-presenter = "app.main:main"
+
+[project.entry-points."reachy_mini_apps"]
+reachy_presenter = "app.main:ReachyPresenterApp"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]

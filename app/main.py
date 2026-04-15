@@ -1,56 +1,44 @@
-"""Orchestrates parsing, LLM call and presentation through Reachy Mini."""
+"""Reachy Mini Presenter App — entry point for the Reachy Mini app ecosystem."""
 
-import argparse
+import threading
 
-from reachy_mini import ReachyMini
+from reachy_mini import ReachyMini, ReachyMiniApp
 
-from app.llm.openai_client import classify_slide, generate_script
-from app.robot.gestures import emotion_gesture, slide_transition
-from app.robot.tts import speak
+from app.agent import run_for_robot
+from app.tools.present_slide import set_mini
+from app.robot.idle_behavior import IdleBehavior
+from app.robot.gestures import set_idle_behavior
 
 
-def present(file_path: str, parser: str = "pdfplumber") -> None:
-    from app.parsers.parsers import parse
-    slides = parse(file_path, parser=parser)
+class ReachyPresenterApp(ReachyMiniApp):
+    """AI-powered presenter agent using Gemini Bidi streaming.
 
-    # Pre-generate all scripts and classify emotions before connecting to robot
-    print("Generating scripts for all slides...")
-    scripts, emotions = [], []
-    for i, slide_text in enumerate(slides, start=1):
-        if not slide_text.strip():
-            print(f"  Slide {i}: (empty, will skip)")
-            scripts.append(None)
-            emotions.append(None)
-        else:
-            print(f"  Slide {i}: generating...")
-            scripts.append(generate_script(slide_text))
-            emotions.append(classify_slide(slide_text))
-    print("All scripts ready.\n")
+    Loads PDF/PPTX presentations, generates spoken scripts, performs
+    expressive gestures, and answers audience questions via RAG.
+    """
 
-    with ReachyMini() as mini:
-        mini.media.start_playing()
+    request_media_backend: str | None = None  # use default (GStreamer on robot)
+
+    def run(self, reachy_mini: ReachyMini, stop_event: threading.Event) -> None:
+        """Run the presenter agent until stop_event is set."""
+        set_mini(reachy_mini)
+        idle = IdleBehavior(reachy_mini)
+        set_idle_behavior(idle)
+        idle.start()
+        print("Reachy Presenter ready. Just start talking.\n")
         try:
-            for i, (script, emotion) in enumerate(zip(scripts, emotions), start=1):
-                if script is None:
-                    continue
-                print(f"--- Slide {i} [{emotion}] ---")
-                print(f"{script}\n")
-                input("Press Enter to speak this slide (or Ctrl+C to stop)...")
-                slide_transition(mini)       # glance down → look up (~1.2s)
-                emotion_gesture(mini, emotion)  # expressive move (~0.6-1.1s)
-                speak(script, mini)          # speak + face track simultaneously
-        except KeyboardInterrupt:
-            print("\nPresentation stopped.")
+            run_for_robot(reachy_mini)
         finally:
-            mini.media.stop_playing()
+            idle.stop()
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Reachy Mini Presenter")
-    parser.add_argument("file", help="Path to a .pdf or .pptx file")
-    parser.add_argument("--parser", default="pdfplumber")
-    args = parser.parse_args()
-    present(args.file, parser=args.parser)
+    """CLI entry point: reachy-presenter command."""
+    app = ReachyPresenterApp()
+    try:
+        app.wrapped_run()
+    except KeyboardInterrupt:
+        app.stop()
 
 
 if __name__ == "__main__":

@@ -33,6 +33,9 @@ from app.audio_helpers import MIC_SR, GEM_SR, VAD_THRESHOLD, to_pcm_bytes, decod
 from app.tools.present_slide import present_slide, set_mini
 from app.tools.load_presentation import load_presentation
 from app.tools.rag_query import rag_query
+from app.tools.dance import dance
+from app.tools.play_emotion import play_emotion
+from app.tools.move_head import move_head
 
 load_dotenv()
 
@@ -62,7 +65,7 @@ _agent = Agent(
     name="reachy_presenter",
     model=_MODEL,
     instruction=_SYSTEM_PROMPT,
-    tools=[present_slide, load_presentation, rag_query],
+    tools=[present_slide, load_presentation, rag_query, dance, play_emotion, move_head],
 )
 
 _session_service = InMemorySessionService()
