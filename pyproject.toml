@@ -3,35 +3,22 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "reachy-presenter"
+name = "reachy-audience"
 version = "0.1.0"
-description = "AI-powered presentation agent for Reachy Mini using Gemini Bidi streaming"
+description = "AI-powered audience robot for Reachy Mini using Gemini Bidi streaming"
 requires-python = ">=3.10"
 dependencies = [
     "google-adk==1.19.0",
     "google-genai==1.68.0",
-    "openai",
     "python-dotenv",
-    "pdfplumber",
-    "pdf2image",
-    "Pillow",
-    "python-pptx",
     "numpy",
     "scipy",
-    "qdrant-client",
-    "langchain-core",
-    "langchain-qdrant",
-    "fastembed",
-    "cohere",
-    "tiktoken",
 ]
 
 [project.scripts]
-reachy-presenter = "app.main:main"
 reachy-audience = "app.main_audience:main"
 
 [project.entry-points."reachy_mini_apps"]
-reachy_presenter = "app.main:ReachyPresenterApp"
 reachy_audience = "app.main_audience:ReachyAudienceApp"
 
 [tool.hatch.build.targets.wheel]

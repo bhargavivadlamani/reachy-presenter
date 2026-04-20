@@ -1,4 +1,4 @@
-"""Gesture sequences for slide transitions and emotional expression."""
+"""Expressive gesture sequences for the audience robot."""
 
 import numpy as np
 from reachy_mini.utils import create_head_pose
@@ -6,49 +6,10 @@ from reachy_mini.utils import create_head_pose
 _NEUTRAL_HEAD = create_head_pose(pitch=0.0, roll=0.0, yaw=0.0)
 _NEUTRAL_ANTENNAS = np.deg2rad([0.0, 0.0])
 
-_idle = None  # set by set_idle_behavior()
-
-
-def set_idle_behavior(idle) -> None:
-    """Register the IdleBehavior instance so gestures can pause/resume it."""
-    global _idle
-    _idle = idle
-
-
-def slide_transition(mini) -> None:
-    """Glance down briefly (checking notes) then look back up at audience."""
-    if _idle:
-        _idle.pause()
-    try:
-        mini.goto_target(
-            head=create_head_pose(pitch=np.deg2rad(-20)),
-            duration=0.5,
-            method="minjerk",
-        )
-        mini.goto_target(
-            head=_NEUTRAL_HEAD,
-            duration=0.7,
-            method="ease_in_out",
-        )
-    finally:
-        if _idle:
-            _idle.resume()
-
 
 def emotion_gesture(mini, emotion: str) -> None:
-    """Brief expressive movement matching the slide's emotional tone."""
-    if _idle:
-        _idle.pause()
-    try:
-        _emotion_gesture(mini, emotion)
-    finally:
-        if _idle:
-            _idle.resume()
-
-
-def _emotion_gesture(mini, emotion: str) -> None:
+    """Brief expressive movement matching the given emotion."""
     if emotion == "excited":
-        # Antennas up + slight head raise, then settle
         mini.goto_target(
             head=create_head_pose(pitch=np.deg2rad(8)),
             antennas=np.deg2rad([40, 40]),
@@ -61,7 +22,6 @@ def _emotion_gesture(mini, emotion: str) -> None:
             duration=0.4,
         )
     elif emotion == "questioning":
-        # Curious head tilt, then straighten
         mini.goto_target(
             head=create_head_pose(roll=np.deg2rad(12)),
             duration=0.6,
@@ -73,14 +33,13 @@ def _emotion_gesture(mini, emotion: str) -> None:
             method="ease_in_out",
         )
     elif emotion == "serious":
-        # Slight downward look, antennas lower
         mini.goto_target(
             head=create_head_pose(pitch=np.deg2rad(-5)),
             antennas=np.deg2rad([-15, -15]),
             duration=0.6,
             method="minjerk",
         )
-    else:  # neutral
+    else:
         mini.goto_target(
             head=_NEUTRAL_HEAD,
             antennas=_NEUTRAL_ANTENNAS,
