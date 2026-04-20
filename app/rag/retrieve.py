@@ -1,6 +1,6 @@
 # python -m app.rag.retrieve "your query" [--collection ...] [--provider ...] [--model ...] [--sparse-model ...] [--reranker cross-encoder|cohere] [--top-n 5]
 
-import argparse, os
+import argparse, os, threading
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -9,6 +9,34 @@ from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
 # from langsmith import traceable
 from qdrant_client import QdrantClient
 from app.rag.ingest import QDRANT_URL, QDRANT_API_KEY, get_embeddings
+
+_cache_lock = threading.Lock()
+_embeddings_cache: dict = {}
+_sparse_cache: dict = {}
+_qdrant_client: QdrantClient | None = None
+
+
+def _get_client() -> QdrantClient:
+    global _qdrant_client
+    with _cache_lock:
+        if _qdrant_client is None:
+            _qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+        return _qdrant_client
+
+
+def _get_embeddings_cached(provider: str, model: str):
+    key = (provider, model)
+    with _cache_lock:
+        if key not in _embeddings_cache:
+            _embeddings_cache[key] = get_embeddings(provider, model)
+        return _embeddings_cache[key]
+
+
+def _get_sparse_cached(sparse_model: str) -> FastEmbedSparse:
+    with _cache_lock:
+        if sparse_model not in _sparse_cache:
+            _sparse_cache[sparse_model] = FastEmbedSparse(model_name=sparse_model)
+        return _sparse_cache[sparse_model]
 
 
 def rerank(query: str, chunks: list[Document], reranker: str = "cross-encoder", top_k: int = 5) -> list[Document]:
@@ -77,9 +105,9 @@ def retrieve(
     Returns:
         A list of relevant documents.
     """
-    embeddings = get_embeddings(provider, model)
-    sparse = FastEmbedSparse(model_name=sparse_model)
-    client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+    embeddings = _get_embeddings_cached(provider, model)
+    sparse = _get_sparse_cached(sparse_model)
+    client = _get_client()
 
     store = QdrantVectorStore(
         client=client,

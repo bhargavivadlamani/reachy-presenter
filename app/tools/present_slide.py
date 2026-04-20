@@ -51,11 +51,15 @@ def present_slide(script: str = "", slide_number: int = 0, document_text: str = 
             document_text = get_document_text()
 
     if _mini_ref is not None:
-        try:
-            from app.robot.gestures import slide_transition
-            slide_transition(_mini_ref)
-        except Exception as e:
-            print(f"[gesture] {e}")
+        import threading
+        _ref = _mini_ref
+        def _do_gesture():
+            try:
+                from app.robot.gestures import slide_transition
+                slide_transition(_ref)
+            except Exception as e:
+                print(f"[gesture] {e}")
+        threading.Thread(target=_do_gesture, daemon=True).start()
 
     if not script:
         return "No script provided and no presentation loaded. Ask the user what to say."

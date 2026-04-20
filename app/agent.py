@@ -166,7 +166,7 @@ async def _run_bidi_async(
         loop = asyncio.get_event_loop()
         _last_cam_time = 0.0
         while not done.is_set():
-            frame = await loop.run_in_executor(None, get_audio_frame)
+            frame = get_audio_frame()
             if frame is None:
                 await asyncio.sleep(0.01)
                 continue
