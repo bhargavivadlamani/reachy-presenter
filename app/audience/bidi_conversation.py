@@ -197,6 +197,10 @@ class BidiConversationSession:
                 mini.media.stop_recording()
             except Exception:
                 pass
+            try:
+                mini.media.stop_playing()
+            except Exception:
+                pass
             self._on_speaking(False)
             logger.info("[bidi conv] session loop exited")
 

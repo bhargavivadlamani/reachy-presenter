@@ -81,17 +81,14 @@ class AudienceAgent:
     # ------------------------------------------------------------------
 
     def start(self) -> None:
+        # Pipeline lifecycle is owned by BidiConversationSession.
+        # We only read device metadata here; start_playing/stop_playing are its job.
         self._out_sr = self.audience_mini.media.get_output_audio_samplerate()
         self._out_channels = self.audience_mini.media.get_output_channels()
-        self.audience_mini.media.start_playing()
         logger.info("[audience] started — out_sr=%d ch=%d", self._out_sr, self._out_channels)
 
     def stop(self) -> None:
         self._stop_event.set()
-        try:
-            self.audience_mini.media.stop_playing()
-        except Exception:
-            pass
         logger.info("[audience] stopped")
 
     # ------------------------------------------------------------------
@@ -248,13 +245,6 @@ class AudienceAgent:
                 samples = scipy_resample(samples, n).astype(np.float32)
             if self._out_channels > 1 and samples.ndim == 1:
                 samples = np.stack([samples] * self._out_channels, axis=1)
-            # Restart playing pipeline each time to avoid GStreamer idle timeout
-            try:
-                self.audience_mini.media.stop_playing()
-            except Exception:
-                pass
-            self.audience_mini.media.start_playing()
-            time.sleep(0.1)  # let pipeline initialise
             self.audience_mini.media.push_audio_sample(samples)
             duration = len(samples) / self._out_sr
             logger.info("[audience] speaking for %.1fs", duration)

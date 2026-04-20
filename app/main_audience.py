@@ -97,10 +97,12 @@ class ReachyAudienceApp(ReachyMiniApp):
 
         server = AudienceServer()
         server.register(_on_slide)
-        server.start()
 
-        # Start persistent conversation session
+        # Start persistent conversation session first — it owns the audio
+        # pipeline, so it must be live before any slide event can trigger
+        # agent.push_audio_sample().
         conv.start(reachy_mini)
+        server.start()
         presence.start()
 
         print("Audience robot ready.")
