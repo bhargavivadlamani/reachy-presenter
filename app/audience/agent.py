@@ -59,10 +59,12 @@ class AudienceAgent:
         presenter_mini: ReachyMini = None,   # kept for API compat, unused
         mute_presenter_mic: Optional[Callable] = None,
         unmute_presenter_mic: Optional[Callable] = None,
+        on_speaking_changed: Optional[Callable[[bool], None]] = None,
     ) -> None:
         self.audience_mini = audience_mini
         self._mute_presenter = mute_presenter_mic or (lambda: None)
         self._unmute_presenter = unmute_presenter_mic or (lambda: None)
+        self._on_speaking: Callable[[bool], None] = on_speaking_changed or (lambda _: None)
 
         self._client = genai.Client(
             api_key=os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
@@ -146,7 +148,11 @@ class AudienceAgent:
         try:
             self._gesture_question()
             time.sleep(0.5)
-            self._speak(question)
+            self._on_speaking(True)
+            try:
+                self._speak(question)
+            finally:
+                self._on_speaking(False)
         finally:
             time.sleep(0.5)
             self._unmute_presenter()

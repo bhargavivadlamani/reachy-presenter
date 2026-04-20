@@ -48,10 +48,6 @@ class ReachyAudienceApp(ReachyMiniApp):
         except Exception:
             pass
 
-        # --- Slide-reaction agent (TTS questions between slides) ---
-        agent = AudienceAgent(audience_mini=reachy_mini)
-        agent.start()
-
         # --- Attention classifier (DOA + VAD) ---
         attention = AttentionClassifier(
             mini=reachy_mini,
@@ -69,6 +65,15 @@ class ReachyAudienceApp(ReachyMiniApp):
             scanner=presence.scanner,
         )
         listener.start()
+
+        # --- Slide-reaction agent (TTS questions between slides) ---
+        #     on_speaking_changed tells the listener to lock gaze on Robot 1
+        #     while the agent's TTS plays, so DOA doesn't chase its own echo.
+        agent = AudienceAgent(
+            audience_mini=reachy_mini,
+            on_speaking_changed=listener.set_speaking,
+        )
+        agent.start()
 
         # --- Persistent Bidi conversation (starts at boot, never stops on visitor leave) ---
         conv = BidiConversationSession(on_speaking_changed=listener.set_speaking)
