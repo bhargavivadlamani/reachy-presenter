@@ -38,7 +38,7 @@ def move_head(direction: str) -> str:
     if _ges._idle:
         _ges._idle.pause()
     try:
-        _ps._mini_ref.goto_target(head=target, duration=0.5, method="ease_in_out")
+        _ps._mini_ref.goto_target(head=target, duration=1.2, method="ease_in_out")
     finally:
         if _ges._idle:
             _ges._idle.resume()

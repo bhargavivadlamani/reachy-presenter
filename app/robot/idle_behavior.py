@@ -1,4 +1,9 @@
-"""Lightweight idle behavior: breathing head bob + antenna sway while Reachy is listening."""
+"""Lightweight idle behavior: breathing head bob + antenna sway while Reachy is listening.
+
+Also supports face tracking: the greetings integration feeds face poses via
+update_face_pose(). When a fresh face pose is available, the idle thread uses it
+instead of the breathing bob — keeping a single thread in control of set_target.
+"""
 
 import threading
 import time
@@ -52,6 +57,11 @@ class IdleBehavior:
         self._stop_event = threading.Event()
         self._pause_event = threading.Event()  # set → paused
         self._thread: threading.Thread | None = None
+        # Face tracking state — updated by GreetingsIntegration
+        self._face_pose = None
+        self._face_pose_time: float = 0.0
+        self._face_lock = threading.Lock()
+        self._FACE_STALE_S = 0.4  # treat pose as stale after this many seconds
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, daemon=True, name="idle-behavior")
@@ -71,6 +81,15 @@ class IdleBehavior:
         """Resume idle animation after a gesture."""
         self._pause_event.clear()
 
+    def update_face_pose(self, pose) -> None:
+        """Feed the latest detected face pose (called from GreetingsIntegration thread).
+
+        When the pose is fresh the idle thread tracks the face instead of breathing.
+        """
+        with self._face_lock:
+            self._face_pose = pose
+            self._face_pose_time = time.monotonic()
+
     def _run(self) -> None:
         period = 1.0 / self._HZ
         start_pose = _NEUTRAL_HEAD
@@ -86,10 +105,27 @@ class IdleBehavior:
                 time.sleep(period)
                 continue
 
-            t = time.monotonic() - t0
-            head, antennas = _breathing_evaluate(t, start_pose, start_antennas)
-            try:
-                self.mini.set_target(head=head, antennas=antennas)
-            except Exception:
-                pass  # robot not ready yet, skip tick
+            # Check if a fresh face pose is available from GreetingsIntegration
+            with self._face_lock:
+                face_pose = self._face_pose
+                face_age = time.monotonic() - self._face_pose_time
+
+            if face_pose is not None and face_age < self._FACE_STALE_S:
+                # Tracking a face — hold neutral antennas and follow the face.
+                # Reset breathing clock so it restarts smoothly when face is lost.
+                t0 = time.monotonic()
+                start_pose = _NEUTRAL_HEAD
+                start_antennas = _NEUTRAL_ANTENNAS.copy()
+                try:
+                    self.mini.set_target(head=face_pose, antennas=_NEUTRAL_ANTENNAS)
+                except Exception:
+                    pass
+            else:
+                # No face detected — breathing bob + antenna sway
+                t = time.monotonic() - t0
+                head, antennas = _breathing_evaluate(t, start_pose, start_antennas)
+                try:
+                    self.mini.set_target(head=head, antennas=antennas)
+                except Exception:
+                    pass  # robot not ready yet, skip tick
             time.sleep(period)

@@ -12,12 +12,14 @@ Real robot mode:
 """
 
 import asyncio
+import base64
 import logging
 import queue as _queue
 import threading
 from pathlib import Path
 from typing import Callable, Optional
 
+import cv2
 import numpy as np
 import sounddevice as sd
 from dotenv import load_dotenv
@@ -28,7 +30,8 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 from reachy_mini import ReachyMini
-from scipy.signal import resample as scipy_resample  # used in run_for_robot resampling
+from math import gcd as _gcd
+from scipy.signal import resample as _scipy_resample
 from app.audio_helpers import MIC_SR, GEM_SR, VAD_THRESHOLD, to_pcm_bytes, decode_pcm
 from app.tools.present_slide import present_slide, set_mini
 from app.tools.load_presentation import load_presentation
@@ -47,6 +50,25 @@ for _noisy_logger in (
     logging.getLogger(_noisy_logger).setLevel(logging.CRITICAL)
 
 _MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
+
+# Module-level reference to the active LiveRequestQueue.
+# Set inside _run_bidi_async so the peer HTTP server can inject messages.
+_live_queue: Optional[LiveRequestQueue] = None
+
+
+def inject_message(text: str) -> bool:
+    """Inject a text message into the running Bidi session (thread-safe).
+
+    Called by the peer HTTP server when Robot 2 speaks to Robot 1.
+    Returns True if a session is active and the message was queued.
+    """
+    if _live_queue is None:
+        return False
+    _live_queue.send_content(
+        types.Content(role="user", parts=[types.Part(text=text)])
+    )
+    logging.getLogger(__name__).info("[agent] injected peer message: %s", text)
+    return True
 _APP_NAME = "reachy-presenter"
 _USER_ID = "presenter"
 _SESSION_ID = "main"
@@ -97,16 +119,28 @@ async def _run_bidi_async(
     mic_sr: int,
     clear_audio: Callable[[], None] = lambda: None,
     unmute_audio: Callable[[], None] = lambda: None,
+    on_audio_start: Callable[[], None] = lambda: None,
     initial_text: str = "",
     idle_timeout: float = 30.0,
+    get_frame: Optional[Callable[[], Optional[np.ndarray]]] = None,
+    wobbler=None,
 ) -> None:
+    global _live_queue
     await _get_or_create_session(_USER_ID, _SESSION_ID)
     live_queue = LiveRequestQueue()
+    _live_queue = live_queue
     run_config = RunConfig(
         streaming_mode=StreamingMode.BIDI,
         response_modalities=["AUDIO"],
         output_audio_transcription=None,
         input_audio_transcription=None,
+        realtime_input_config=types.RealtimeInputConfig(
+            automaticActivityDetection=types.AutomaticActivityDetection(
+                endOfSpeechSensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
+                startOfSpeechSensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
+                silenceDurationMs=400,  # default ~700ms; 400ms cuts response lag
+            ),
+        ),
     )
 
     done = asyncio.Event()
@@ -130,13 +164,12 @@ async def _run_bidi_async(
                 types.Content(role="user", parts=[types.Part(text=initial_text)])
             )
         loop = asyncio.get_event_loop()
+        _last_cam_time = 0.0
         while not done.is_set():
             frame = await loop.run_in_executor(None, get_audio_frame)
             if frame is None:
                 await asyncio.sleep(0.01)
                 continue
-            # Throttle timer restarts to once/sec — high-fps sources (e.g. 77fps
-            # robot mic) would otherwise thrash asyncio task creation/cancellation.
             now = loop.time()
             if now - _last_idle_restart >= 1.0:
                 _last_idle_restart = now
@@ -145,9 +178,20 @@ async def _run_bidi_async(
             live_queue.send_realtime(
                 types.Blob(mime_type="audio/pcm;rate=16000", data=pcm)
             )
+            # Send camera frame every 5s so Gemini can answer "what do you see?"
+            if get_frame and now - _last_cam_time >= 5.0:
+                _last_cam_time = now
+                cam = await loop.run_in_executor(None, get_frame)
+                if cam is not None:
+                    ok, jpeg = cv2.imencode(".jpg", cam, [cv2.IMWRITE_JPEG_QUALITY, 60])
+                    if ok:
+                        live_queue.send_realtime(
+                            types.Blob(mime_type="image/jpeg", data=jpeg.tobytes())
+                        )
         live_queue.close()
 
     async def downstream() -> None:
+        _turn_audio_started = False
         try:
             async for event in _runner.run_live(
                 user_id=_USER_ID,
@@ -157,12 +201,25 @@ async def _run_bidi_async(
             ):
                 if getattr(event, "interrupted", False):
                     clear_audio()
+                    if wobbler:
+                        wobbler.reset()
                 if event.content:
                     for part in event.content.parts:
                         if hasattr(part, "inline_data") and part.inline_data:
+                            if not _turn_audio_started:
+                                _turn_audio_started = True
+                                on_audio_start()
                             samples = decode_pcm(part.inline_data.data)
                             push_audio(samples)
+                            # Feed raw PCM to wobbler so head moves with speech rhythm
+                            if wobbler:
+                                wobbler.feed(
+                                    base64.b64encode(part.inline_data.data).decode()
+                                )
                 if getattr(event, "turn_complete", False):
+                    _turn_audio_started = False
+                    if wobbler:
+                        wobbler.reset()
                     unmute_audio()
                     _restart_idle_timer()
         except Exception as e:
@@ -175,6 +232,7 @@ async def _run_bidi_async(
     try:
         await asyncio.gather(upstream(), downstream())
     finally:
+        _live_queue = None
         if idle_task and not idle_task.done():
             idle_task.cancel()
 
@@ -183,34 +241,77 @@ async def _run_bidi_async(
 # Real robot mode — audio via mini.media (GStreamer on the robot hardware)
 # ---------------------------------------------------------------------------
 
-def run_for_robot(mini: ReachyMini) -> None:
-    """Start a bidi agent session on the real robot, managing media lifecycle."""
-    robot_mic_sr = mini.media.get_input_audio_samplerate()
+def run_for_robot(mini: ReachyMini, attention_gate=None) -> None:
+    """Start a bidi agent session on the real robot, managing media lifecycle.
+
+    Args:
+        mini: Connected ReachyMini instance.
+        attention_gate: Optional AttentionGate instance. When gate.available is
+            True the SDK handles audio recording and only speech directed at the
+            robot is forwarded to Gemini. When None or gate.available is False,
+            the original always-on streaming behaviour is used.
+    """
+    # When the attention gate is active it owns audio recording via
+    # ReachyMiniManager (SOUNDDEVICE_OPENCV backend). We only need to
+    # drive playback from mini.media ourselves.
+    gate_active = attention_gate is not None and attention_gate.available
+
+    # Audio from the SDK is already at 16kHz (on_speech_audio_ready contract).
+    # When always-on, use the robot's native mic sample rate.
+    robot_mic_sr = 16000 if gate_active else mini.media.get_input_audio_samplerate()
     robot_out_sr = mini.media.get_output_audio_samplerate()
-
-    def _get_frame() -> Optional[np.ndarray]:
-        return mini.media.get_audio_sample()
-
     robot_out_channels = mini.media.get_output_channels()
 
+    def _get_frame() -> Optional[np.ndarray]:
+        if gate_active:
+            # Attention-filtered chunks queued by on_speech_audio_ready
+            return attention_gate.next_frame()
+        return mini.media.get_audio_sample()
+
+    # Pre-compute target sample count denominator once (avoids per-chunk division)
+    _resample_needed = robot_out_sr != GEM_SR
+    _resample_ratio = robot_out_sr / GEM_SR if _resample_needed else 1.0
+
     def _push(samples: np.ndarray) -> None:
-        if robot_out_sr != GEM_SR:
-            n = int(len(samples) * robot_out_sr / GEM_SR)
-            samples = scipy_resample(samples, n).astype(np.float32)
+        if _resample_needed:
+            n = int(len(samples) * _resample_ratio)
+            samples = _scipy_resample(samples, n).astype(np.float32)
         if robot_out_channels > 1 and samples.ndim == 1:
             samples = np.stack([samples] * robot_out_channels, axis=1)
         mini.media.push_audio_sample(samples)
 
+    def _on_audio_start() -> None:
+        """Gemini's first audio chunk arrived — tell the SDK Reachy is speaking."""
+        if attention_gate is not None:
+            attention_gate.set_responding(True)
+
+    def _unmute() -> None:
+        """Gemini turn complete — SDK may resume listening."""
+        if attention_gate is not None:
+            attention_gate.set_responding(False)
+
+    from app.robot.head_wobbler import HeadWobbler
+    wobbler = HeadWobbler(mini)
+    wobbler.start()
+
     mini.media.start_playing()
-    mini.media.start_recording()
+    if not gate_active:
+        mini.media.start_recording()
     try:
         asyncio.run(_run_bidi_async(
             get_audio_frame=_get_frame,
             push_audio=_push,
             mic_sr=robot_mic_sr,
+            on_audio_start=_on_audio_start,
+            unmute_audio=_unmute,
+            idle_timeout=300.0 if gate_active else 30.0,
+            get_frame=mini.media.get_frame,
+            wobbler=wobbler,
         ))
     finally:
-        mini.media.stop_recording()
+        wobbler.stop()
+        if not gate_active:
+            mini.media.stop_recording()
         mini.media.stop_playing()
 
 

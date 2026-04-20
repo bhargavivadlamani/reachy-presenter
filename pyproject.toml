@@ -28,9 +28,11 @@ dependencies = [
 
 [project.scripts]
 reachy-presenter = "app.main:main"
+reachy-audience = "app.main_audience:main"
 
 [project.entry-points."reachy_mini_apps"]
 reachy_presenter = "app.main:ReachyPresenterApp"
+reachy_audience = "app.main_audience:ReachyAudienceApp"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
