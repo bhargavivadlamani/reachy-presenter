@@ -115,50 +115,53 @@ class AudienceAgent:
         if self._stop_event.is_set():
             return
         self.busy = True
+        try:
+            # 1. Immediate reaction — presenter is about to start the slide
+            self._gesture_reaction(slide_number)
 
-        # 1. Immediate reaction — presenter is about to start the slide
-        self._gesture_reaction(slide_number)
+            # 2. Wait for presenter to finish speaking
+            #    Estimate from word count so we don't cut them off
+            word_count = len(script.split())
+            estimated_duration = max(_MIN_WAIT, word_count / _WORDS_PER_SECOND)
+            wait = estimated_duration + _POST_SPEECH_BUFFER
+            logger.info("[audience] waiting %.1fs for presenter to finish (est. %.1fs for %d words)",
+                        wait, estimated_duration, word_count)
 
-        # 2. Wait for presenter to finish speaking
-        #    Estimate from word count so we don't cut them off
-        word_count = len(script.split())
-        estimated_duration = max(_MIN_WAIT, word_count / _WORDS_PER_SECOND)
-        wait = estimated_duration + _POST_SPEECH_BUFFER
-        logger.info("[audience] waiting %.1fs for presenter to finish (est. %.1fs for %d words)",
-                    wait, estimated_duration, word_count)
+            for _ in range(int(wait * 10)):
+                if self._stop_event.is_set():
+                    return
+                time.sleep(0.1)
 
-        for _ in range(int(wait * 10)):
             if self._stop_event.is_set():
                 return
-            time.sleep(0.1)
 
-        if self._stop_event.is_set():
-            return
+            # 3. Generate a question
+            question = self._generate_question(slide_number, script)
+            if not question:
+                logger.warning("[audience] no question generated for slide %d", slide_number)
+                return
 
-        # 3. Generate a question
-        question = self._generate_question(slide_number, script)
-        if not question:
-            logger.warning("[audience] no question generated for slide %d", slide_number)
-            return
+            logger.info("[audience] asking: %s", question)
 
-        logger.info("[audience] asking: %s", question)
-
-        # 4. Question gesture, then speak
-        self._mute_presenter()
-        try:
-            self._gesture_question()
-            time.sleep(0.5)
-            self._on_speaking(True)
+            # 4. Question gesture, then speak
+            self._mute_presenter()
             try:
-                self._speak(question)
+                self._gesture_question()
+                time.sleep(0.5)
+                self._on_speaking(True)
+                try:
+                    self._speak(question)
+                finally:
+                    self._on_speaking(False)
             finally:
-                self._on_speaking(False)
-        finally:
-            time.sleep(0.5)
-            self._unmute_presenter()
+                time.sleep(0.5)
+                self._unmute_presenter()
 
-        self._slide_history.append(f"Slide {slide_number}: {script[:120]}")
-        self.busy = False
+            self._slide_history.append(f"Slide {slide_number}: {script[:120]}")
+        except Exception as e:
+            logger.exception("[audience] _react_and_ask failed: %s", e)
+        finally:
+            self.busy = False
 
     def _gesture_reaction(self, slide_number: int) -> None:
         """Play a physical reaction gesture on the audience robot."""
